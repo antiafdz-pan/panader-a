@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -107,6 +106,16 @@ input:focus,select:focus{border-color:var(--accent)}
 .extra-precio{flex:1;max-width:80px;height:36px;font-size:13px}
 .extra-del{background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;padding:2px 4px;flex-shrink:0;line-height:1}
 .btn-add-extra{width:100%;height:32px;border:1.5px dashed var(--border);border-radius:var(--radius-sm);background:transparent;color:var(--muted);font-size:13px;cursor:pointer;margin-top:2px;font-family:'DM Sans',sans-serif}
+/* devoluciones */
+.devol-section{padding:8px 12px;border-top:1.5px solid var(--border);background:#f0fdf4}
+.devol-title{font-size:11px;font-weight:600;color:var(--green);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.devol-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border);border-radius:4px;overflow:hidden;margin-bottom:4px}
+.devol-row{display:flex;align-items:center;justify-content:space-between;padding:6px 8px;background:#f0fdf4;gap:4px}
+.devol-nombre{font-size:11px;color:var(--green);font-weight:500;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.devol-ctrl{display:flex;align-items:center;gap:3px}
+.db{width:24px;height:24px;border-radius:50%;border:1.5px solid var(--green);background:var(--green-light);color:var(--green);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1}
+.db:active{transform:scale(0.88)}
+.dn{font-size:13px;font-weight:600;min-width:14px;text-align:center;color:var(--green)}
 .cuenta-card{background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);margin-bottom:10px;overflow:hidden}
 .cuenta-header{display:flex;align-items:center;justify-content:space-between;padding:13px 14px;cursor:pointer}
 .cuenta-nombre{font-size:15px;font-weight:600;flex:1}
@@ -129,6 +138,8 @@ input:focus,select:focus{border-color:var(--accent)}
 .hist-dia-panes{font-size:11px;color:var(--muted);margin-top:2px;display:flex;flex-wrap:wrap;gap:4px}
 .pan-chip{background:var(--bg);border:1px solid var(--border);border-radius:99px;padding:1px 7px;font-size:11px}
 .hist-dia-total{font-weight:600}
+details summary::-webkit-details-marker{display:none}
+details[open] summary span:last-child{transform:rotate(90deg);display:inline-block}
 .error-banner{background:var(--red-light);color:var(--red);border-radius:var(--radius-sm);padding:12px 14px;font-size:13px;margin-bottom:1rem}
 </style>
 </head>
@@ -183,6 +194,15 @@ input:focus,select:focus{border-color:var(--accent)}
         <div class="sum-row"><span>AG – Art. grande</span><span class="sum-val" id="r-AG">0</span></div>
         <div class="sum-row"><span>Pallarina</span><span class="sum-val" id="r-PA">0</span></div>
         <div class="sum-total"><span class="sum-total-label">Cobrado hoy</span><span class="sum-total-val" id="r-total">0,00 €</span></div>
+        <div style="border-top:1.5px solid var(--green-light);margin-top:10px;padding-top:10px">
+          <div style="font-size:12px;font-weight:600;color:var(--green);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Devoluciones recogidas</div>
+          <div class="sum-row"><span>G devueltas</span><span class="sum-val" id="d-G">0</span></div>
+          <div class="sum-row"><span>P devueltas</span><span class="sum-val" id="d-P">0</span></div>
+          <div class="sum-row"><span>B devueltos</span><span class="sum-val" id="d-B">0</span></div>
+          <div class="sum-row"><span>AP devueltos</span><span class="sum-val" id="d-AP">0</span></div>
+          <div class="sum-row"><span>AG devueltos</span><span class="sum-val" id="d-AG">0</span></div>
+          <div class="sum-row"><span>Pallarina devueltas</span><span class="sum-val" id="d-PA">0</span></div>
+        </div>
       </div>
       <button class="btn btn-full btn-primary" id="btn-cerrar-jornada" style="margin-bottom:.75rem">Cerrar jornada y guardar</button>
     </div>
@@ -355,7 +375,7 @@ function renderFijos(){
     btn.style.cssText=yaEsta?'opacity:.6;cursor:default':'';
     btn.textContent=(yaEsta?'✓ ':'')+cg.nombre;
     if(!yaEsta){btn.addEventListener('click',async()=>{
-      const nuevo={id:String(Date.now()),clienteId:cg.id,nombre:cg.nombre,qtys:{},extras:[],pagaHoy:cg.pago!=='mensual'};
+      const nuevo={id:String(Date.now()),clienteId:cg.id,nombre:cg.nombre,qtys:{},extras:[],devols:{},pagaHoy:cg.pago!=='mensual'};
       PANES.forEach(p=>nuevo.qtys[p.key]=0);jornada.push(nuevo);
       await guardarJornadaDB();renderFijos();renderReparto();
     });}
@@ -385,6 +405,10 @@ function renderReparto(){
   jornada.forEach(c=>{
     const esEspecial=tieneEspecial(c);const total=totalCliente(c);
     const card=document.createElement('div');card.className='card';
+    // resumen compacto solo panes con cantidad > 0
+    const resumenPanes=PANES.filter(p=>c.qtys[p.key]>0).map(p=>`<span style="background:var(--bg);border:1px solid var(--border);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;color:var(--text)">${c.qtys[p.key]} ${p.key}</span>`).join('');
+    const totalDevols=PANES.reduce((s,p)=>s+((c.devols&&c.devols[p.key])||0),0);
+    const resumenDevols=totalDevols>0?`<span style="background:var(--green-light);border:1px solid var(--green);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;color:var(--green)">↩ ${totalDevols}</span>`:'';
     const panesHtml=PANES.map(p=>{
       const precio=precioCliente(c,p.key);const normal=PANES.find(x=>x.key===p.key).precio;
       const esDif=esEspecial&&precio!==normal;const activo=c.qtys[p.key]>0;
@@ -392,13 +416,40 @@ function renderReparto(){
     }).join('');
     const extras=c.extras||[];
     const extrasHtml=extras.map((ex,i)=>`<div class="extra-item"><input class="extra-nota" type="text" placeholder="Ej: Empanada de atún" value="${ex.desc||''}" data-id="${c.id}" data-ei="${i}" data-field="desc"/><input class="extra-precio" type="number" step="0.01" min="0" placeholder="€" value="${ex.precio||''}" data-id="${c.id}" data-ei="${i}" data-field="precio"/><button class="extra-del" data-id="${c.id}" data-ei="${i}" data-action="del-extra">×</button></div>`).join('');
-    card.innerHTML=`<div class="card-header"><span class="card-name">${c.nombre}</span>${esEspecial?'<span class="badge badge-blue">tarifa especial ★</span>':''}${!c.pagaHoy?'<span class="badge badge-red">a cuenta</span>':''}<span class="card-amount">${fmt(total)} €</span><button class="del-btn" data-id="${c.id}" data-action="del">×</button></div><div class="panes-grid">${panesHtml}</div><div class="extras-section"><div class="extras-title">Extras del día</div>${extrasHtml}<button class="btn-add-extra" data-id="${c.id}" data-action="add-extra">+ Añadir extra (empanada, pastel...)</button></div>`;
+    const devols=c.devols||{};
+    const devolHtml=PANES.map(p=>{
+      const v=devols[p.key]||0;
+      return `<div class="devol-row"><div class="devol-nombre">${p.key}</div><div class="devol-ctrl"><button class="db" data-id="${c.id}" data-key="${p.key}" data-action="devol-dec">−</button><span class="dn">${v}</span><button class="db" data-id="${c.id}" data-key="${p.key}" data-action="devol-inc">+</button></div></div>`;
+    }).join('');
+    const totalDevols=PANES.reduce((s,p)=>s+(devols[p.key]||0),0);
+    card.innerHTML=`
+      <div class="card-header">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:${resumenPanes?'5px':'0'}">
+            <span class="card-name">${c.nombre}</span>
+            ${esEspecial?'<span class="badge badge-blue">★</span>':''}
+            ${!c.pagaHoy?'<span class="badge badge-red">cuenta</span>':''}
+          </div>
+          ${resumenPanes?`<div style="display:flex;flex-wrap:wrap;gap:4px">${resumenPanes}${resumenDevols}</div>`:''}
+        </div>
+        <span class="card-amount" style="margin-left:8px">${fmt(total)} €</span>
+        <button class="del-btn" data-id="${c.id}" data-action="del">×</button>
+      </div>
+      <details>
+        <summary style="list-style:none;padding:8px 14px;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:1px solid var(--border);background:var(--bg);text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;justify-content:space-between">
+          <span>Editar cantidades</span><span style="font-size:16px">›</span>
+        </summary>
+        <div class="panes-grid">${panesHtml}</div>
+        <div class="extras-section"><div class="extras-title">Extras del día</div>${extrasHtml}<button class="btn-add-extra" data-id="${c.id}" data-action="add-extra">+ Añadir extra (empanada, pastel...)</button></div>
+        <div class="devol-section"><div class="devol-title">↩ Devoluciones${totalDevols>0?' ('+totalDevols+' uds)':''}</div><div class="devol-grid">${devolHtml}</div></div>
+      </details>`;
     lista.appendChild(card);
   });
   document.getElementById('resumen').style.display=jornada.length?'block':'none';
   document.getElementById('badge-clientes').textContent=jornada.length;
   document.getElementById('r-nc').textContent=jornada.length;
   PANES.forEach(p=>{const el=document.getElementById('r-'+p.key);if(el)el.textContent=jornada.reduce((s,c)=>s+c.qtys[p.key],0);});
+  PANES.forEach(p=>{const el=document.getElementById('d-'+p.key);if(el)el.textContent=jornada.reduce((s,c)=>s+((c.devols&&c.devols[p.key])||0),0);});
   const tot=jornada.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
   document.getElementById('r-total').textContent=fmt(tot)+' €';
 }
@@ -410,6 +461,8 @@ document.getElementById('lista-clientes').addEventListener('click',async e=>{
   if(action==='del'){jornada=jornada.filter(x=>x.id!==id);}
   else if(action==='add-extra'){if(!c.extras)c.extras=[];c.extras.push({desc:'',precio:''});}
   else if(action==='del-extra'){c.extras.splice(parseInt(btn.dataset.ei),1);}
+  else if(action==='devol-inc'){if(!c.devols)c.devols={};c.devols[btn.dataset.key]=(c.devols[btn.dataset.key]||0)+1;}
+  else if(action==='devol-dec'){if(!c.devols)c.devols={};if(c.devols[btn.dataset.key]>0)c.devols[btn.dataset.key]--;}
   else{const key=btn.dataset.key;if(action==='inc')c.qtys[key]++;else if(action==='dec'&&c.qtys[key]>0)c.qtys[key]--;}
   await guardarJornadaDB();renderReparto();
 });
@@ -430,6 +483,8 @@ document.getElementById('btn-cerrar-jornada').addEventListener('click',async()=>
   const hoy=hoyISO();
   const panesDia={};PANES.forEach(p=>panesDia[p.key]=0);
   jornada.forEach(c=>PANES.forEach(p=>panesDia[p.key]+=c.qtys[p.key]));
+  const devolsDia={};PANES.forEach(p=>devolsDia[p.key]=0);
+  jornada.forEach(c=>PANES.forEach(p=>devolsDia[p.key]+=(c.devols&&c.devols[p.key])||0));
   const cuentasEx=await dbGet('cuentas','order=id.asc');
   for(const c of jornada){
     if(!c.pagaHoy&&totalCliente(c)>0){
@@ -446,7 +501,7 @@ document.getElementById('btn-cerrar-jornada').addEventListener('click',async()=>
       }else{await dbInsert('cuentas',{cliente_id:cid,cliente_nombre:c.nombre,total:importe,dias:[nuevoDia]});}
     }
   }
-  if(window._jid)await dbUpdate('jornadas',window._jid,{cerrada:true,clientes_data:jornada});
+  if(window._jid)await dbUpdate('jornadas',window._jid,{cerrada:true,clientes_data:jornada,devols_dia:devolsDia});
   jornada=[];window._jid=null;renderReparto();renderFijos();comprobarAlertas();
   alert('✓ Jornada guardada correctamente.');
 });
@@ -471,8 +526,8 @@ document.getElementById('m-cliente-ok').addEventListener('click',async()=>{
   const pagaHoy=document.getElementById('m-cliente-paga').value==='si';
   const errEl=document.getElementById('m-cliente-err');errEl.style.display='none';
   let nuevo;
-  if(selVal){const cg=clientesGuardados.find(x=>x.id==selVal);nuevo={id:String(Date.now()),clienteId:cg.id,nombre:cg.nombre,qtys:{},extras:[],pagaHoy};}
-  else if(nombreManual){nuevo={id:String(Date.now()),clienteId:null,nombre:nombreManual,qtys:{},extras:[],pagaHoy};}
+  if(selVal){const cg=clientesGuardados.find(x=>x.id==selVal);nuevo={id:String(Date.now()),clienteId:cg.id,nombre:cg.nombre,qtys:{},extras:[],devols:{},pagaHoy};}
+  else if(nombreManual){nuevo={id:String(Date.now()),clienteId:null,nombre:nombreManual,qtys:{},extras:[],devols:{},pagaHoy};}
   else{errEl.textContent='Escribe un nombre o elige un cliente';errEl.style.display='block';return;}
   PANES.forEach(p=>nuevo.qtys[p.key]=0);jornada.push(nuevo);
   document.getElementById('inp-cliente').value='';cerrarModal('modal-cliente');
@@ -528,7 +583,9 @@ async function renderHistorial(){
       cls.forEach(c=>PANES.forEach(p=>pd[p.key]+=c.qtys[p.key]||0));
       const tot=cls.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
       const panesStr=PANES.filter(p=>pd[p.key]>0).map(p=>`<span class="pan-chip">${p.key}:${pd[p.key]}</span>`).join('');
-      return `<div class="hist-dia"><div><div class="hist-dia-fecha">${labelFecha(j.fecha)}</div><div class="hist-dia-panes">${panesStr}</div></div><span class="hist-dia-total">${fmt(tot)} €</span></div>`;
+      const dd=j.devols_dia||{};
+      const devolStr=PANES.filter(p=>dd[p.key]>0).map(p=>`<span class="pan-chip" style="background:var(--green-light);color:var(--green);border-color:var(--green)">↩${p.key}:${dd[p.key]}</span>`).join('');
+      return `<div class="hist-dia"><div><div class="hist-dia-fecha">${labelFecha(j.fecha)}</div><div class="hist-dia-panes">${panesStr}${devolStr}</div></div><span class="hist-dia-total">${fmt(tot)} €</span></div>`;
     }).join('');
     html+=`<div class="hist-mes"><div class="hist-mes-header" onclick="this.nextElementSibling.classList.toggle('open')"><span class="hist-mes-titulo">${tituloMes}</span><span class="hist-mes-total">${fmt(totalMes)} €</span></div><div class="hist-mes-body"><div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border)">${panesMesTot}</div>${diasHtml}</div></div>`;
   }
