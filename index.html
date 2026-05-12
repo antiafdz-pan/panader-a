@@ -471,9 +471,42 @@ document.getElementById('lista-clientes').addEventListener('input',async e=>{
   const el=e.target;if(!el.dataset.id||!el.dataset.field)return;
   const c=jornada.find(x=>x.id===el.dataset.id);if(!c||!c.extras)return;
   c.extras[parseInt(el.dataset.ei)][el.dataset.field]=el.value;
+  // actualizar solo el importe en cabecera sin re-renderizar toda la tarjeta
   const card=el.closest('.card');
   if(card){const am=card.querySelector('.card-amount');if(am)am.textContent=fmt(totalCliente(c))+' €';}
-  clearTimeout(el._t);el._t=setTimeout(async()=>{await guardarJornadaDB();renderReparto();},900);
+  // guardar en DB con debounce largo, sin re-renderizar
+  clearTimeout(el._t);el._t=setTimeout(async()=>{await guardarJornadaDB();},1500);
+});
+
+// cerrar details al perder el foco
+document.getElementById('lista-clientes').addEventListener('focusout',e=>{
+  const details=e.target.closest('details');
+  if(!details)return;
+  // esperar un tick para ver si el foco se mueve a otro elemento dentro del mismo details
+  setTimeout(()=>{
+    if(!details.contains(document.activeElement)){
+      details.removeAttribute('open');
+      // actualizar resumen compacto de piezas en cabecera
+      const card=details.closest('.card');
+      if(card){
+        const id=details.querySelector('[data-id]')?.dataset?.id;
+        if(id){
+          const c=jornada.find(x=>x.id===id);
+          if(c){
+            const chips=card.querySelectorAll('.card-header span[style]');
+            // re-render solo la fila de chips
+            const chipsWrap=card.querySelector('.card-header div div:last-child');
+            if(chipsWrap){
+              const resumenPanes=PANES.filter(p=>c.qtys[p.key]>0).map(p=>`<span style="background:var(--bg);border:1px solid var(--border);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;color:var(--text)">${c.qtys[p.key]} ${p.key}</span>`).join('');
+              const totalDevols=PANES.reduce((s,p)=>s+((c.devols&&c.devols[p.key])||0),0);
+              const resumenDevols=totalDevols>0?`<span style="background:var(--green-light);border:1px solid var(--green);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;color:var(--green)">↩ ${totalDevols}</span>`:'';
+              chipsWrap.innerHTML=resumenPanes+resumenDevols;
+            }
+          }
+        }
+      }
+    }
+  },150);
 });
 
 // CERRAR JORNADA
@@ -545,22 +578,29 @@ async function renderCuentas(){
   cuentas.forEach(cuenta=>{
     const ultimaFecha=cuenta.dias&&cuenta.dias.length?new Date(cuenta.dias[cuenta.dias.length-1].fecha+'T12:00:00'):null;
     const moroso=ultimaFecha&&ultimaFecha<haceUnMes;
-    const div=document.createElement('div');div.className='cuenta-card';
+    div.innerHTML=`<div class="cuenta-header" onclick="this.nextElementSibling.classList.toggle('open')"><span class="cuenta-nombre">${cuenta.cliente_nombre}${moroso?' ⚠':''}</span><span class="cuenta-deuda ${moroso?'deuda-red':'deuda-warn'}">${fmt(cuenta.total)} €</span></div><div class="cuenta-body">${diasHtml}</div>`;
     const diasHtml=(cuenta.dias||[]).slice().reverse().map(d=>{
       const panesStr=PANES.filter(p=>d.panes[p.key]>0).map(p=>`${p.key}:${d.panes[p.key]}`).join(' · ');
       const extrasStr=(d.extras||[]).filter(ex=>ex.desc||ex.precio).map(ex=>`${ex.desc||'Extra'} ${fmt(ex.precio||0)} €`).join(' · ');
       return `<div class="cuenta-dia"><div><div class="cuenta-dia-fecha">${labelFecha(d.fecha)}</div><div class="cuenta-dia-panes">${[panesStr,extrasStr].filter(Boolean).join(' · ')}</div></div><span class="cuenta-dia-importe">${fmt(d.importe)} €</span></div>`;
     }).join('');
-    div.innerHTML=`<div class="cuenta-header" onclick="this.nextElementSibling.classList.toggle('open')"><span class="cuenta-nombre">${cuenta.cliente_nombre}${moroso?' ⚠':''}</span><span class="cuenta-deuda ${moroso?'deuda-red':'deuda-warn'}">${fmt(cuenta.total)} €</span></div><div class="cuenta-body">${diasHtml}<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between"><span style="font-size:13px;color:var(--muted)">¿Ha pagado en tienda?</span><button class="btn btn-sm btn-success" data-cid="${cuenta.id}">Marcar pagado ✓</button></div></div>`;
-    cont.appendChild(div);
-  });
-  cont.querySelectorAll('[data-cid]').forEach(btn=>{
-    btn.addEventListener('click',async()=>{
-      if(!confirm('¿Marcar la cuenta de este cliente como pagada?'))return;
-      await dbUpdate('cuentas',btn.dataset.cid,{total:0,dias:[],updated_at:new Date().toISOString()});
-      renderCuentas();comprobarAlertas();
+    const btnPagado=document.createElement('button');
+    btnPagado.className='btn btn-sm btn-success';
+    btnPagado.textContent='Marcar pagado ✓';
+    btnPagado.addEventListener('click',async()=>{
+      if(!confirm(`¿Marcar la cuenta de ${cuenta.cliente_nombre} como pagada?`))return;
+      try{
+        await dbUpdate('cuentas',cuenta.id,{total:0,dias:[],updated_at:new Date().toISOString()});
+        renderCuentas();comprobarAlertas();
+      }catch(e){alert('Error: '+e.message);}
     });
-  });
+    const pagoDiv=document.createElement('div');
+    pagoDiv.style.cssText='margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between';
+    pagoDiv.innerHTML='<span style="font-size:13px;color:var(--muted)">¿Ha pagado en tienda?</span>';
+    pagoDiv.appendChild(btnPagado);
+    const body=div.querySelector('.cuenta-body');
+    body.appendChild(pagoDiv);
+    cont.appendChild(div);
   }catch(e){cont.innerHTML=`<div class="error-banner">Error al cargar cuentas: ${e.message}</div>`;}
 }
 async function renderHistorial(){
