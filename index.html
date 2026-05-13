@@ -154,7 +154,8 @@ details[open] summary span:last-child{transform:rotate(90deg);display:inline-blo
       <p>Selecciona tu nombre para empezar</p>
     </div>
     <div class="rep-list" id="rep-list"><div class="loading">Cargando...</div></div>
-    <button class="btn btn-full" id="btn-nuevo-rep">+ Añadir repartidor</button>
+    <button class="btn btn-full" id="btn-nuevo-rep" style="margin-bottom:.5rem">+ Añadir repartidor</button>
+    <button class="btn btn-full" id="btn-panel-jefe" style="background:var(--accent-light);color:var(--accent-text);border-color:var(--accent)">👁 Panel del jefe</button>
   </div>
 </div>
 
@@ -204,7 +205,11 @@ details[open] summary span:last-child{transform:rotate(90deg);display:inline-blo
           <div class="sum-row"><span>Pallarina devueltas</span><span class="sum-val" id="d-PA">0</span></div>
         </div>
       </div>
-      <button class="btn btn-full btn-primary" id="btn-cerrar-jornada" style="margin-bottom:.75rem">Cerrar jornada y guardar</button>
+      <button class="btn btn-full btn-primary" id="btn-cerrar-jornada" style="margin-bottom:.5rem">Cerrar jornada y guardar</button>
+      <div style="display:flex;gap:8px;margin-bottom:.75rem">
+        <button class="btn btn-full" id="btn-whatsapp" style="background:var(--green-light);color:var(--green);border-color:var(--green)">📲 Enviar por WhatsApp</button>
+        <button class="btn btn-full" id="btn-cambio">💰 Calcular cambio</button>
+      </div>
     </div>
     <div id="panel-cuentas" style="display:none"><div id="cuentas-contenido"><div class="loading">Cargando...</div></div></div>
     <div id="panel-historial" style="display:none"><div id="hist-contenido"><div class="empty"><div class="empty-icon">📋</div>Sin historial aún</div></div></div>
@@ -217,7 +222,40 @@ details[open] summary span:last-child{transform:rotate(90deg);display:inline-blo
   </div>
 </div>
 
-<!-- MODAL: repartidor -->
+<!-- MODAL: calculadora cambio -->
+<div class="modal-bg" id="modal-cambio">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <h3>💰 Calcular cambio</h3>
+    <div class="field"><label>Cliente</label>
+      <select id="cambio-cliente"><option value="">Selecciona cliente...</option></select>
+    </div>
+    <div class="field"><label>El cliente paga con (€)</label>
+      <input type="number" id="cambio-paga" placeholder="Ej: 20" min="0" step="0.5"/>
+    </div>
+    <div id="cambio-resultado" style="display:none;background:var(--green-light);border-radius:var(--radius-sm);padding:14px;text-align:center;margin-top:8px">
+      <div style="font-size:13px;color:var(--green);margin-bottom:4px">Cambio a devolver</div>
+      <div style="font-size:32px;font-weight:700;color:var(--green)" id="cambio-val">0,00 €</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px" id="cambio-detalle"></div>
+    </div>
+    <div id="cambio-error" style="display:none;background:var(--red-light);color:var(--red);padding:10px;border-radius:var(--radius-sm);font-size:13px;margin-top:8px"></div>
+    <div class="modal-btns">
+      <button class="btn btn-full" id="cambio-cancel">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: panel jefe -->
+<div class="modal-bg" id="modal-jefe">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <h3>👁 Panel del jefe</h3>
+    <div id="jefe-contenido"><div class="loading">Cargando...</div></div>
+    <div class="modal-btns" style="margin-top:1rem">
+      <button class="btn btn-full" id="jefe-cancel">Cerrar</button>
+    </div>
+  </div>
+</div>
 <div class="modal-bg" id="modal-rep">
   <div class="modal">
     <div class="modal-handle"></div>
@@ -325,6 +363,118 @@ function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classL
 function abrirModal(id){document.getElementById(id).classList.add('open');}
 function cerrarModal(id){document.getElementById(id).classList.remove('open');}
 document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open');}));
+
+// WHATSAPP
+document.getElementById('btn-whatsapp').addEventListener('click',()=>{
+  if(!jornada.length){alert('No hay clientes en el reparto de hoy.');return;}
+  const hoy=new Date();
+  const fecha=hoy.getDate()+' de '+MESES[hoy.getMonth()];
+  let msg='🍞 *Reparto '+repActual.nombre+' — '+fecha+'*\n\n';
+  jornada.forEach(c=>{
+    const total=totalCliente(c);
+    const panes=PANES.filter(p=>c.qtys[p.key]>0).map(p=>c.qtys[p.key]+' '+p.key).join(', ');
+    const extras=(c.extras||[]).filter(ex=>ex.desc||ex.precio).map(ex=>(ex.desc||'Extra')+' '+fmt(ex.precio||0)+' €').join(', ');
+    const devols=PANES.filter(p=>(c.devols&&c.devols[p.key]>0)).map(p=>'↩'+c.devols[p.key]+' '+p.key).join(', ');
+    msg+='• *'+c.nombre+'*: '+[panes,extras].filter(Boolean).join(' + ')+(devols?' (dev: '+devols+')':'')+' = '+fmt(total)+' €'+(c.pagaHoy?'':' 📋 cuenta')+'\n';
+  });
+  const totPanes={};PANES.forEach(p=>totPanes[p.key]=0);
+  jornada.forEach(c=>PANES.forEach(p=>totPanes[p.key]+=c.qtys[p.key]));
+  const totDevols={};PANES.forEach(p=>totDevols[p.key]=0);
+  jornada.forEach(c=>PANES.forEach(p=>totDevols[p.key]+=(c.devols&&c.devols[p.key])||0));
+  msg+='\n📦 *Total panes:* '+PANES.filter(p=>totPanes[p.key]>0).map(p=>totPanes[p.key]+' '+p.key).join(', ');
+  const totDevolStr=PANES.filter(p=>totDevols[p.key]>0).map(p=>totDevols[p.key]+' '+p.key).join(', ');
+  if(totDevolStr)msg+='\n↩ *Devoluciones:* '+totDevolStr;
+  const totalCobrado=jornada.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
+  const totalCuenta=jornada.filter(c=>!c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
+  msg+='\n💰 *Cobrado:* '+fmt(totalCobrado)+' €';
+  if(totalCuenta>0)msg+='\n📋 *A cuenta:* '+fmt(totalCuenta)+' €';
+  window.open('https://wa.me/?text='+encodeURIComponent(msg),'_blank');
+});
+
+// CAMBIO
+document.getElementById('btn-cambio').addEventListener('click',()=>{
+  const sel=document.getElementById('cambio-cliente');
+  sel.innerHTML='<option value="">Selecciona cliente...</option>';
+  jornada.forEach(c=>{
+    const o=document.createElement('option');o.value=c.id;
+    o.textContent=c.nombre+' ('+fmt(totalCliente(c))+' €)';
+    sel.appendChild(o);
+  });
+  document.getElementById('cambio-paga').value='';
+  document.getElementById('cambio-resultado').style.display='none';
+  document.getElementById('cambio-error').style.display='none';
+  abrirModal('modal-cambio');
+});
+document.getElementById('cambio-cancel').addEventListener('click',()=>cerrarModal('modal-cambio'));
+
+function calcularCambio(){
+  const selVal=document.getElementById('cambio-cliente').value;
+  const paga=parseFloat(document.getElementById('cambio-paga').value);
+  const res=document.getElementById('cambio-resultado');
+  const err=document.getElementById('cambio-error');
+  res.style.display='none';err.style.display='none';
+  if(!selVal||isNaN(paga))return;
+  const c=jornada.find(x=>x.id===selVal);if(!c)return;
+  const total=totalCliente(c);
+  if(paga<total){
+    err.textContent='El cliente paga menos de lo que debe ('+fmt(total)+' €)';
+    err.style.display='block';return;
+  }
+  const cambio=paga-total;
+  document.getElementById('cambio-val').textContent=fmt(cambio)+' €';
+  document.getElementById('cambio-detalle').textContent='Total: '+fmt(total)+' € | Paga: '+fmt(paga)+' €';
+  res.style.display='block';
+}
+document.getElementById('cambio-cliente').addEventListener('change',calcularCambio);
+document.getElementById('cambio-paga').addEventListener('input',calcularCambio);
+
+// PANEL JEFE
+document.getElementById('btn-panel-jefe').addEventListener('click',async()=>{
+  abrirModal('modal-jefe');
+  const cont=document.getElementById('jefe-contenido');
+  cont.innerHTML='<div class="loading">Cargando...</div>';
+  try{
+    const reps=await dbGet('repartidores','order=nombre.asc');
+    const hoy=new Date().toISOString().split('T')[0];
+    const cuentas=await dbGet('cuentas','total=gt.0&order=total.desc');
+    const totalDeuda=cuentas.reduce((s,c)=>s+c.total,0);
+    let html='<div style="background:var(--accent-light);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:1rem">';
+    html+='<div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Total pendiente de cobro</div>';
+    html+='<div style="font-size:28px;font-weight:700;color:var(--accent)">'+fmt(totalDeuda)+' €</div>';
+    html+='<div style="font-size:12px;color:var(--muted);margin-top:2px">'+cuentas.length+' clientes con deuda</div></div>';
+    html+='<div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Repartos de hoy</div>';
+    for(const rep of reps){
+      const jornadas=await dbGet('jornadas','repartidor_id=eq.'+rep.id+'&fecha=eq.'+hoy+'&order=created_at.desc');
+      const j=jornadas.length?jornadas[0]:null;
+      const cls=j?j.clientes_data||[]:[];
+      const totalHoy=cls.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
+      const panesDia={};PANES.forEach(p=>panesDia[p.key]=0);
+      cls.forEach(c=>PANES.forEach(p=>panesDia[p.key]+=c.qtys[p.key]||0));
+      const panesStr=PANES.filter(p=>panesDia[p.key]>0).map(p=>panesDia[p.key]+' '+p.key).join(', ')||'Sin datos';
+      const estado=j&&j.cerrada?'✅ Cerrada':j?'🟡 En curso':'⚪ Sin empezar';
+      html+='<div style="background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:8px">';
+      html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
+      html+='<span style="font-size:15px;font-weight:600">'+rep.nombre+'</span>';
+      html+='<span style="font-size:13px">'+estado+'</span></div>';
+      html+='<div style="font-size:13px;color:var(--muted)">'+panesStr+'</div>';
+      if(cls.length)html+='<div style="font-size:14px;font-weight:600;color:var(--accent);margin-top:4px">'+fmt(totalHoy)+' € cobrado · '+cls.length+' clientes</div>';
+      html+='</div>';
+    }
+    if(cuentas.length){
+      html+='<div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:1rem 0 8px">Top deudas</div>';
+      cuentas.slice(0,5).forEach(c=>{
+        const haceUnMes=new Date();haceUnMes.setMonth(haceUnMes.getMonth()-1);
+        const ultimaFecha=c.dias&&c.dias.length?new Date(c.dias[c.dias.length-1].fecha+'T12:00:00'):null;
+        const moroso=ultimaFecha&&ultimaFecha<haceUnMes;
+        html+='<div style="display:flex;justify-content:space-between;padding:8px 14px;background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius-sm);margin-bottom:6px">';
+        html+='<span style="font-size:14px">'+c.cliente_nombre+(moroso?' ⚠':'')+'</span>';
+        html+='<span style="font-size:14px;font-weight:700;color:'+(moroso?'var(--red)':'var(--warn)')+'">'+fmt(c.total)+' €</span></div>';
+      });
+    }
+    cont.innerHTML=html;
+  }catch(e){cont.innerHTML='<div class="error-banner">Error: '+e.message+'</div>';}
+});
+document.getElementById('jefe-cancel').addEventListener('click',()=>cerrarModal('modal-jefe'));
 
 // LOGIN
 async function renderLogin(){
@@ -480,31 +630,31 @@ document.getElementById('lista-clientes').addEventListener('input',async e=>{
 document.getElementById('lista-clientes').addEventListener('focusout',e=>{
   const details=e.target.closest('details');
   if(!details)return;
-  // esperar un tick para ver si el foco se mueve a otro elemento dentro del mismo details
   setTimeout(()=>{
-    if(!details.contains(document.activeElement)){
-      details.removeAttribute('open');
-      // actualizar resumen compacto de piezas en cabecera
-      const card=details.closest('.card');
-      if(card){
-        const id=details.querySelector('[data-id]')?.dataset?.id;
-        if(id){
-          const c=jornada.find(x=>x.id===id);
-          if(c){
-            const chips=card.querySelectorAll('.card-header span[style]');
-            // re-render solo la fila de chips
-            const chipsWrap=card.querySelector('.card-header div div:last-child');
-            if(chipsWrap){
-              const resumenPanes=PANES.filter(p=>c.qtys[p.key]>0).map(p=>`<span style="background:var(--bg);border:1px solid var(--border);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;color:var(--text)">${c.qtys[p.key]} ${p.key}</span>`).join('');
-              const tdv=PANES.reduce((s,p)=>s+((c.devols&&c.devols[p.key])||0),0);
-              const resumenDevols=tdv>0?`<span style="background:var(--green-light);border:1px solid var(--green);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;color:var(--green)">↩ ${tdv}</span>`:'';
-              chipsWrap.innerHTML=resumenPanes+resumenDevols;
-            }
+    const active=document.activeElement;
+    // no cerrar si el foco está en un input, select o button dentro del mismo details
+    if(details.contains(active))return;
+    // no cerrar si el foco fue a otro details
+    if(active&&active.closest('details'))return;
+    details.removeAttribute('open');
+    // actualizar resumen compacto
+    const card=details.closest('.card');
+    if(card){
+      const firstBtn=details.querySelector('[data-id]');
+      if(firstBtn){
+        const c=jornada.find(x=>x.id===firstBtn.dataset.id);
+        if(c){
+          const chipsWrap=card.querySelector('.card-header div div:last-child');
+          if(chipsWrap){
+            const rp=PANES.filter(p=>c.qtys[p.key]>0).map(p=>'<span style="background:var(--bg);border:1px solid var(--border);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;color:var(--text)">'+c.qtys[p.key]+' '+p.key+'</span>').join('');
+            const tdv=PANES.reduce((s,p)=>s+((c.devols&&c.devols[p.key])||0),0);
+            const rd=tdv>0?'<span style="background:var(--green-light);border:1px solid var(--green);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;color:var(--green)">↩ '+tdv+'</span>':'';
+            chipsWrap.innerHTML=rp+rd;
           }
         }
       }
     }
-  },150);
+  },200);
 });
 
 // CERRAR JORNADA
