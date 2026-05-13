@@ -1110,7 +1110,7 @@ async function renderCuentas(){
   if(!cuentas.length){cont.innerHTML='<div class="empty"><div class="empty-icon">✅</div>Ningún cliente debe nada</div>';return;}
   const haceUnMes=new Date();haceUnMes.setMonth(haceUnMes.getMonth()-1);
   cont.innerHTML='';
-  cuentas.forEach(cuenta=>{
+  for(const cuenta of cuentas){
     const ultimaFecha=cuenta.dias&&cuenta.dias.length?new Date(cuenta.dias[cuenta.dias.length-1].fecha+'T12:00:00'):null;
     const moroso=ultimaFecha&&ultimaFecha<haceUnMes;
 
@@ -1217,7 +1217,7 @@ async function renderCuentas(){
     div.appendChild(cuentaHeader);
     div.appendChild(cuentaBody);
     cont.appendChild(div);
-  });
+  }
   }catch(e){
     const msg=e.message||'Error desconocido';
     cont.innerHTML='<div class="error-banner">Error al cargar cuentas: '+msg+'</div>';
