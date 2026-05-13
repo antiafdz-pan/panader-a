@@ -138,6 +138,10 @@ input:focus,select:focus{border-color:var(--accent)}
 .hist-dia-panes{font-size:11px;color:var(--muted);margin-top:2px;display:flex;flex-wrap:wrap;gap:4px}
 .pan-chip{background:var(--bg);border:1px solid var(--border);border-radius:99px;padding:1px 7px;font-size:11px}
 .hist-dia-total{font-weight:600}
+.drag-handle{cursor:grab;color:var(--muted);font-size:18px;padding:2px 6px;touch-action:none;user-select:none;flex-shrink:0}
+.drag-handle:active{cursor:grabbing}
+.card.dragging{opacity:0.4;border:2px dashed var(--accent)}
+.card.drag-over{border:2px solid var(--accent);transform:scale(1.01)}
 details summary::-webkit-details-marker{display:none}
 details[open] summary span:last-child{transform:rotate(90deg);display:inline-block}
 .error-banner{background:var(--red-light);color:var(--red);border-radius:var(--radius-sm);padding:12px 14px;font-size:13px;margin-bottom:1rem}
@@ -345,6 +349,12 @@ details[open] summary span:last-child{transform:rotate(90deg);display:inline-blo
       <select id="mcg-fijo">
         <option value="no">No</option>
         <option value="si">Sí, es cliente fijo ⭐</option>
+      </select>
+    </div>
+    <div class="field"><label>¿Acepta devoluciones de pan?</label>
+      <select id="mcg-devol">
+        <option value="no">No</option>
+        <option value="si">Sí, recoge devoluciones ↩</option>
       </select>
     </div>
     <p style="font-size:12px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">Precios especiales (vacío = precio normal)</p>
@@ -663,12 +673,18 @@ function renderReparto(){
     }).join('');
     const extras=c.extras||[];
     const extrasHtml=extras.map((ex,i)=>`<div class="extra-item"><input class="extra-nota" type="text" placeholder="Ej: Empanada de atún" value="${ex.desc||''}" data-id="${c.id}" data-ei="${i}" data-field="desc"/><input class="extra-precio" type="number" step="0.01" min="0" placeholder="€" value="${ex.precio||''}" data-id="${c.id}" data-ei="${i}" data-field="precio"/><button class="extra-del" data-id="${c.id}" data-ei="${i}" data-action="del-extra">×</button></div>`).join('');
-    const devolHtml=PANES.map(p=>{
+    const cg=c.clienteId?clientesGuardados.find(x=>x.id===c.clienteId):null;
+    const tieneDevol=cg&&cg.devol==='si';
+    const devolHtml=tieneDevol?PANES.map(p=>{
       const v=devols[p.key]||0;
-      return `<div class="devol-row"><div class="devol-nombre">${p.key}</div><div class="devol-ctrl"><button class="db" data-id="${c.id}" data-key="${p.key}" data-action="devol-dec">−</button><span class="dn">${v}</span><button class="db" data-id="${c.id}" data-key="${p.key}" data-action="devol-inc">+</button></div></div>`;
-    }).join('');
+      return '<div class="devol-row"><div class="devol-nombre">'+p.key+'</div><div class="devol-ctrl"><button class="db" data-id="'+c.id+'" data-key="'+p.key+'" data-action="devol-dec">−</button><span class="dn">'+v+'</span><button class="db" data-id="'+c.id+'" data-key="'+p.key+'" data-action="devol-inc">+</button></div></div>';
+    }).join(''):'';
+    const seccionDevol=tieneDevol?'<div class="devol-section"><div class="devol-title">↩ Devoluciones'+(totalDevols>0?' ('+totalDevols+' uds)':'')+'</div><div class="devol-grid">'+devolHtml+'</div></div>':'';
+    card.setAttribute('data-id', c.id);
+    card.setAttribute('draggable','true');
     card.innerHTML=`
       <div class="card-header">
+        <span class="drag-handle" title="Arrastrar para reordenar">⠿</span>
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:${resumenPanes?'5px':'0'}">
             <span class="card-name">${c.nombre}</span>
@@ -686,7 +702,7 @@ function renderReparto(){
         </summary>
         <div class="panes-grid">${panesHtml}</div>
         <div class="extras-section"><div class="extras-title">Extras del día</div>${extrasHtml}<button class="btn-add-extra" data-id="${c.id}" data-action="add-extra">+ Añadir extra (empanada, pastel...)</button></div>
-        <div class="devol-section"><div class="devol-title">↩ Devoluciones${totalDevols>0?' ('+totalDevols+' uds)':''}</div><div class="devol-grid">${devolHtml}</div></div>
+        ${seccionDevol}
       </details>`;
     lista.appendChild(card);
   });
@@ -697,6 +713,88 @@ function renderReparto(){
   PANES.forEach(p=>{const el=document.getElementById('d-'+p.key);if(el)el.textContent=jornada.reduce((s,c)=>s+((c.devols&&c.devols[p.key])||0),0);});
   const tot=jornada.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
   document.getElementById('r-total').textContent=fmt(tot)+' €';
+  iniciarDragDrop();
+}
+
+function iniciarDragDrop(){
+  const lista=document.getElementById('lista-clientes');
+  const cards=lista.querySelectorAll('.card[draggable]');
+  let dragSrc=null;
+
+  cards.forEach(card=>{
+    // Desktop drag
+    card.addEventListener('dragstart',e=>{
+      dragSrc=card;card.classList.add('dragging');
+      e.dataTransfer.effectAllowed='move';
+    });
+    card.addEventListener('dragend',()=>{
+      card.classList.remove('dragging');
+      lista.querySelectorAll('.card').forEach(c=>c.classList.remove('drag-over'));
+    });
+    card.addEventListener('dragover',e=>{
+      e.preventDefault();e.dataTransfer.dropEffect='move';
+      if(card!==dragSrc){card.classList.add('drag-over');}
+    });
+    card.addEventListener('dragleave',()=>card.classList.remove('drag-over'));
+    card.addEventListener('drop',async e=>{
+      e.preventDefault();card.classList.remove('drag-over');
+      if(dragSrc&&dragSrc!==card){
+        const srcId=dragSrc.dataset.id;
+        const dstId=card.dataset.id;
+        const srcIdx=jornada.findIndex(x=>x.id===srcId);
+        const dstIdx=jornada.findIndex(x=>x.id===dstId);
+        if(srcIdx>-1&&dstIdx>-1){
+          const [moved]=jornada.splice(srcIdx,1);
+          jornada.splice(dstIdx,0,moved);
+          await guardarJornadaDB();renderReparto();
+        }
+      }
+    });
+
+    // Mobile touch drag
+    let touchStartY=0,touchCard=null,clone=null;
+    card.addEventListener('touchstart',e=>{
+      const handle=e.target.closest('.drag-handle');
+      if(!handle)return;
+      touchCard=card;touchStartY=e.touches[0].clientY;
+      clone=card.cloneNode(true);
+      clone.style.cssText='position:fixed;left:'+card.getBoundingClientRect().left+'px;top:'+card.getBoundingClientRect().top+'px;width:'+card.offsetWidth+'px;opacity:0.8;z-index:999;pointer-events:none;border:2px solid var(--accent);border-radius:var(--radius)';
+      document.body.appendChild(clone);
+      card.classList.add('dragging');
+      e.preventDefault();
+    },{passive:false});
+    card.addEventListener('touchmove',e=>{
+      if(!touchCard||!clone)return;
+      const dy=e.touches[0].clientY-touchStartY;
+      clone.style.transform='translateY('+dy+'px)';
+      // find card under finger
+      const touch=e.touches[0];
+      const els=document.elementsFromPoint(touch.clientX,touch.clientY);
+      const target=els.find(el=>el.classList.contains('card')&&el!==touchCard&&el!==clone);
+      lista.querySelectorAll('.card').forEach(c=>c.classList.remove('drag-over'));
+      if(target)target.classList.add('drag-over');
+      e.preventDefault();
+    },{passive:false});
+    card.addEventListener('touchend',async e=>{
+      if(!touchCard||!clone)return;
+      clone.remove();clone=null;touchCard.classList.remove('dragging');
+      const touch=e.changedTouches[0];
+      const els=document.elementsFromPoint(touch.clientX,touch.clientY);
+      const target=els.find(el=>el.classList.contains('card')&&el!==touchCard);
+      lista.querySelectorAll('.card').forEach(c=>c.classList.remove('drag-over'));
+      if(target){
+        const srcId=touchCard.dataset.id;const dstId=target.dataset.id;
+        const srcIdx=jornada.findIndex(x=>x.id===srcId);
+        const dstIdx=jornada.findIndex(x=>x.id===dstId);
+        if(srcIdx>-1&&dstIdx>-1){
+          const [moved]=jornada.splice(srcIdx,1);
+          jornada.splice(dstIdx,0,moved);
+          await guardarJornadaDB();renderReparto();
+        }
+      }
+      touchCard=null;
+    });
+  });
 }
 
 document.getElementById('lista-clientes').addEventListener('click',async e=>{
@@ -860,35 +958,91 @@ async function renderCuentas(){
   cuentas.forEach(cuenta=>{
     const ultimaFecha=cuenta.dias&&cuenta.dias.length?new Date(cuenta.dias[cuenta.dias.length-1].fecha+'T12:00:00'):null;
     const moroso=ultimaFecha&&ultimaFecha<haceUnMes;
-    const diasHtml=(cuenta.dias||[]).slice().reverse().map(d=>{
-      const panesStr=PANES.filter(p=>d.panes[p.key]>0).map(p=>`${p.key}:${d.panes[p.key]}`).join(' · ');
-      const extrasStr=(d.extras||[]).filter(ex=>ex.desc||ex.precio).map(ex=>`${ex.desc||'Extra'} ${fmt(ex.precio||0)} €`).join(' · ');
-      return `<div class="cuenta-dia"><div><div class="cuenta-dia-fecha">${labelFecha(d.fecha)}</div><div class="cuenta-dia-panes">${[panesStr,extrasStr].filter(Boolean).join(' · ')}</div></div><span class="cuenta-dia-importe">${fmt(d.importe)} €</span></div>`;
-    }).join('');
+
+    // agrupar días por mes
+    const porMes={};
+    (cuenta.dias||[]).forEach(d=>{
+      const mk=d.fecha.slice(0,7); // YYYY-MM
+      if(!porMes[mk]){porMes[mk]={total:0,dias:[]};}
+      porMes[mk].total=parseFloat((porMes[mk].total+d.importe).toFixed(2));
+      porMes[mk].dias.push(d);
+    });
+
     const div=document.createElement('div');div.className='cuenta-card';
+
+    // cabecera cliente
     const cuentaHeader=document.createElement('div');cuentaHeader.className='cuenta-header';
     cuentaHeader.innerHTML='<span class="cuenta-nombre">'+cuenta.cliente_nombre+(moroso?' ⚠':'')+'</span><span class="cuenta-deuda '+(moroso?'deuda-red':'deuda-warn')+'">'+fmt(cuenta.total)+' €</span>';
-    cuentaHeader.addEventListener('click',()=>cuentaBody.classList.toggle('open'));
     const cuentaBody=document.createElement('div');cuentaBody.className='cuenta-body';
-    cuentaBody.innerHTML=diasHtml;
-    div.appendChild(cuentaHeader);
-    div.appendChild(cuentaBody);
-    const btnPagado=document.createElement('button');
-    btnPagado.className='btn btn-sm btn-success';
-    btnPagado.textContent='Marcar pagado ✓';
-    btnPagado.addEventListener('click',async()=>{
-      if(!confirm(`¿Marcar la cuenta de ${cuenta.cliente_nombre} como pagada?`))return;
+    cuentaHeader.addEventListener('click',()=>cuentaBody.classList.toggle('open'));
+
+    // meses ordenados de más reciente a más antiguo
+    const mesesOrdenados=Object.keys(porMes).sort().reverse();
+    mesesOrdenados.forEach(mk=>{
+      const [anyo,mes]=mk.split('-');
+      const tituloMes=MESES[parseInt(mes)-1]+' '+anyo;
+      const dataMes=porMes[mk];
+
+      const mesDiv=document.createElement('div');
+      mesDiv.style.cssText='margin-bottom:10px';
+
+      // cabecera del mes
+      const mesHeader=document.createElement('div');
+      mesHeader.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--bg);border-radius:var(--radius-sm);cursor:pointer;margin-bottom:4px';
+      mesHeader.innerHTML='<span style="font-size:13px;font-weight:600;color:var(--text)">'+tituloMes+'</span><span style="font-size:14px;font-weight:700;color:var(--warn)">'+fmt(dataMes.total)+' €</span>';
+      const mesCuerpo=document.createElement('div');
+      mesCuerpo.style.display='none';
+      mesHeader.addEventListener('click',()=>mesCuerpo.style.display=mesCuerpo.style.display==='none'?'block':'none');
+
+      // días del mes
+      dataMes.dias.slice().reverse().forEach(d=>{
+        const panesStr=PANES.filter(p=>d.panes[p.key]>0).map(p=>p.key+':'+d.panes[p.key]).join(' · ');
+        const extrasStr=(d.extras||[]).filter(ex=>ex.desc||ex.precio).map(ex=>(ex.desc||'Extra')+' '+fmt(ex.precio||0)+' €').join(' · ');
+        const diaDiv=document.createElement('div');diaDiv.className='cuenta-dia';
+        diaDiv.innerHTML='<div><div class="cuenta-dia-fecha">'+labelFecha(d.fecha)+'</div><div class="cuenta-dia-panes">'+[panesStr,extrasStr].filter(Boolean).join(' · ')+'</div></div><span class="cuenta-dia-importe">'+fmt(d.importe)+' €</span>';
+        mesCuerpo.appendChild(diaDiv);
+      });
+
+      // botón pagar este mes
+      const btnMes=document.createElement('button');
+      btnMes.className='btn btn-sm btn-success';
+      btnMes.style.cssText='width:100%;margin-top:8px';
+      btnMes.textContent='Marcar '+tituloMes+' como pagado ✓';
+      btnMes.addEventListener('click',async()=>{
+        if(!confirm('¿Marcar '+tituloMes+' de '+cuenta.cliente_nombre+' como pagado?'))return;
+        try{
+          // eliminar los días de ese mes y recalcular total
+          const diasRestantes=(cuenta.dias||[]).filter(d=>d.fecha.slice(0,7)!==mk);
+          const nuevoTotal=diasRestantes.reduce((s,d)=>s+d.importe,0);
+          await dbUpdate('cuentas',cuenta.id,{total:parseFloat(nuevoTotal.toFixed(2)),dias:diasRestantes,updated_at:new Date().toISOString()});
+          renderCuentas();comprobarAlertas();
+        }catch(e){alert('Error: '+e.message);}
+      });
+      mesCuerpo.appendChild(btnMes);
+      mesDiv.appendChild(mesHeader);
+      mesDiv.appendChild(mesCuerpo);
+      cuentaBody.appendChild(mesDiv);
+    });
+
+    // botón pagar todo
+    const pagoDiv=document.createElement('div');
+    pagoDiv.style.cssText='margin-top:4px;padding-top:12px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between';
+    pagoDiv.innerHTML='<span style="font-size:13px;color:var(--muted)">¿Paga todo?</span>';
+    const btnTodo=document.createElement('button');
+    btnTodo.className='btn btn-sm btn-success';
+    btnTodo.textContent='Marcar todo pagado ✓';
+    btnTodo.addEventListener('click',async()=>{
+      if(!confirm('¿Marcar TODA la cuenta de '+cuenta.cliente_nombre+' como pagada?'))return;
       try{
         await dbUpdate('cuentas',cuenta.id,{total:0,dias:[],updated_at:new Date().toISOString()});
         renderCuentas();comprobarAlertas();
       }catch(e){alert('Error: '+e.message);}
     });
-    const pagoDiv=document.createElement('div');
-    pagoDiv.style.cssText='margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between';
-    pagoDiv.innerHTML='<span style="font-size:13px;color:var(--muted)">¿Ha pagado en tienda?</span>';
-    pagoDiv.appendChild(btnPagado);
-    const body=div.querySelector('.cuenta-body');
-    body.appendChild(pagoDiv);
+    pagoDiv.appendChild(btnTodo);
+    cuentaBody.appendChild(pagoDiv);
+
+    div.appendChild(cuentaHeader);
+    div.appendChild(cuentaBody);
     cont.appendChild(div);
   });
   }catch(e){
@@ -1030,6 +1184,7 @@ async function renderClientesGuardados(){
     const div=document.createElement('div');div.className='client-item';
     const tags=[];
     if(cg.fijo==='si')tags.push('<span class="badge badge-accent">⭐ Fijo</span>');
+    if(cg.devol==='si')tags.push('<span class="badge badge-green">↩ Devoluciones</span>');
     if(cg.pago==='mensual')tags.push('<span class="badge badge-red">Cuenta</span>');
     if(cg.precios&&Object.values(cg.precios).some(v=>v!=null))tags.push('<span class="badge badge-blue">Tarifa especial</span>');
     div.innerHTML=`<div><div class="client-item-name">${cg.nombre}</div><div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">${tags.join('')}</div></div><span style="font-size:13px;color:var(--muted)">Editar →</span>`;
@@ -1045,6 +1200,7 @@ function abrirModalCG(cg){
   document.getElementById('mcg-nombre').value=cg?cg.nombre:'';
   document.getElementById('mcg-pago').value=cg?cg.pago||'diario':'diario';
   document.getElementById('mcg-fijo').value=cg?cg.fijo||'no':'no';
+  document.getElementById('mcg-devol').value=cg?cg.devol||'no':'no';
   document.getElementById('mcg-err').style.display='none';
   const grid=document.getElementById('precios-grid');grid.innerHTML='';
   PANES.forEach(p=>{
@@ -1065,10 +1221,11 @@ async function guardarCG(){
   if(!nombre){errEl.textContent='El nombre es obligatorio';errEl.style.display='block';return;}
   const pago=document.getElementById('mcg-pago').value;
   const fijo=document.getElementById('mcg-fijo').value;
+  const devol=document.getElementById('mcg-devol').value;
   const precios={};PANES.forEach(p=>{const v=document.getElementById('mcg-p-'+p.key).value;precios[p.key]=v!==''?parseFloat(v):null;});
   try{
-    if(editCGId)await dbUpdate('clientes',editCGId,{nombre,pago,fijo,precios});
-    else await dbInsert('clientes',{nombre,pago,fijo,precios});
+    if(editCGId)await dbUpdate('clientes',editCGId,{nombre,pago,fijo,devol,precios});
+    else await dbInsert('clientes',{nombre,pago,fijo,devol,precios});
     clientesGuardados=await dbGet('clientes','order=nombre.asc');
     cerrarModal('modal-cg');renderClientesGuardados();
   }catch(e){errEl.textContent='Error: '+e.message;errEl.style.display='block';}
