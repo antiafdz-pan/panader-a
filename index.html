@@ -1383,8 +1383,7 @@ function abrirModalCG(cg){
   const DIAS_SEMANA=['L','M','X','J','V','S','D'];
   const DIAS_KEYS=['lun','mar','mie','jue','vie','sab','dom'];
   const diasActivos=cg&&cg.dias_reparto?cg.dias_reparto:['lun','mar','mie','jue','vie','sab','dom'];
-  const grid=document.getElementById('mcg-dias-grid');
-  grid.innerHTML='';
+ const preciosGrid=document.getElementById('precios-grid');preciosGrid.innerHTML='';
   DIAS_KEYS.forEach((key,i)=>{
     const activo=diasActivos.includes(key);
     const btn=document.createElement('button');
