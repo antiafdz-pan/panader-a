@@ -576,12 +576,13 @@ async function renderCuentas(){
   cuentas.forEach(cuenta=>{
     const ultimaFecha=cuenta.dias&&cuenta.dias.length?new Date(cuenta.dias[cuenta.dias.length-1].fecha+'T12:00:00'):null;
     const moroso=ultimaFecha&&ultimaFecha<haceUnMes;
-    div.innerHTML=`<div class="cuenta-header" onclick="this.nextElementSibling.classList.toggle('open')"><span class="cuenta-nombre">${cuenta.cliente_nombre}${moroso?' ⚠':''}</span><span class="cuenta-deuda ${moroso?'deuda-red':'deuda-warn'}">${fmt(cuenta.total)} €</span></div><div class="cuenta-body">${diasHtml}</div>`;
     const diasHtml=(cuenta.dias||[]).slice().reverse().map(d=>{
       const panesStr=PANES.filter(p=>d.panes[p.key]>0).map(p=>`${p.key}:${d.panes[p.key]}`).join(' · ');
       const extrasStr=(d.extras||[]).filter(ex=>ex.desc||ex.precio).map(ex=>`${ex.desc||'Extra'} ${fmt(ex.precio||0)} €`).join(' · ');
       return `<div class="cuenta-dia"><div><div class="cuenta-dia-fecha">${labelFecha(d.fecha)}</div><div class="cuenta-dia-panes">${[panesStr,extrasStr].filter(Boolean).join(' · ')}</div></div><span class="cuenta-dia-importe">${fmt(d.importe)} €</span></div>`;
     }).join('');
+    const div=document.createElement('div');div.className='cuenta-card';
+    div.innerHTML=`<div class="cuenta-header" onclick="this.nextElementSibling.classList.toggle('open')"><span class="cuenta-nombre">${cuenta.cliente_nombre}${moroso?' ⚠':''}</span><span class="cuenta-deuda ${moroso?'deuda-red':'deuda-warn'}">${fmt(cuenta.total)} €</span></div><div class="cuenta-body">${diasHtml}</div>`;
     const btnPagado=document.createElement('button');
     btnPagado.className='btn btn-sm btn-success';
     btnPagado.textContent='Marcar pagado ✓';
