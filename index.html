@@ -1157,10 +1157,11 @@ async function renderCuentas(){
       btnMes.addEventListener('click',async()=>{
         if(!confirm('¿Marcar '+tituloMes+' de '+cuenta.cliente_nombre+' como pagado?'))return;
         try{
-          // eliminar los días de ese mes y recalcular total
           const diasRestantes=(cuenta.dias||[]).filter(d=>d.fecha.slice(0,7)!==mk);
           const nuevoTotal=diasRestantes.reduce((s,d)=>s+d.importe,0);
           await dbUpdate('cuentas',cuenta.id,{total:parseFloat(nuevoTotal.toFixed(2)),dias:diasRestantes,updated_at:new Date().toISOString()});
+          // registrar pago
+          await dbInsert('pagos',{cliente_nombre:cuenta.cliente_nombre,cliente_id:cuenta.cliente_id||null,importe:dataMes.total,fecha:hoyISO()});
           renderCuentas();comprobarAlertas();
         }catch(e){alert('Error: '+e.message);}
       });
@@ -1169,6 +1170,21 @@ async function renderCuentas(){
       mesDiv.appendChild(mesCuerpo);
       cuentaBody.appendChild(mesDiv);
     });
+
+    // historial de pagos de este cliente
+    const pagosCliente=await dbGet('pagos','cliente_nombre=eq.'+encodeURIComponent(cuenta.cliente_nombre)+'&order=fecha.desc&limit=6');
+    if(pagosCliente.length){
+      const pagosDiv=document.createElement('div');
+      pagosDiv.style.cssText='margin-top:10px;padding-top:10px;border-top:1px solid var(--border)';
+      pagosDiv.innerHTML='<div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Historial de pagos</div>';
+      pagosCliente.forEach(p=>{
+        const row=document.createElement('div');
+        row.style.cssText='display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:13px';
+        row.innerHTML='<span style="color:var(--muted)">'+labelFecha(p.fecha)+'</span><span style="font-weight:600;color:var(--green)">+'+fmt(p.importe)+' €</span>';
+        pagosDiv.appendChild(row);
+      });
+      cuentaBody.appendChild(pagosDiv);
+    }
 
     // botón pagar todo
     const pagoDiv=document.createElement('div');
@@ -1180,6 +1196,8 @@ async function renderCuentas(){
     btnTodo.addEventListener('click',async()=>{
       if(!confirm('¿Marcar TODA la cuenta de '+cuenta.cliente_nombre+' como pagada?'))return;
       try{
+        // registrar pago por el total antes de borrar
+        await dbInsert('pagos',{cliente_nombre:cuenta.cliente_nombre,cliente_id:cuenta.cliente_id||null,importe:cuenta.total,fecha:hoyISO()});
         await dbUpdate('cuentas',cuenta.id,{total:0,dias:[],updated_at:new Date().toISOString()});
         renderCuentas();comprobarAlertas();
       }catch(e){alert('Error: '+e.message);}
