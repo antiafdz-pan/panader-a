@@ -600,6 +600,7 @@ async function renderCuentas(){
     const body=div.querySelector('.cuenta-body');
     body.appendChild(pagoDiv);
     cont.appendChild(div);
+  });
   }catch(e){
     const msg=e.message||'Error desconocido';
     cont.innerHTML='<div class="error-banner">Error al cargar cuentas: '+msg+'</div>';
