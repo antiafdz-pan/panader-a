@@ -337,7 +337,7 @@ async function renderLogin(){
       btn.innerHTML=`<div class="rep-avatar">${r.nombre[0].toUpperCase()}</div><div><div class="rep-name">${r.nombre}</div><div class="rep-sub">Pulsa para entrar</div></div>`;
       btn.addEventListener('click',()=>entrarReparto(r));cont.appendChild(btn);
     });
-  }catch(e){cont.innerHTML=`<div class="error-banner">Error: ${e.message}</div>`;}
+  }catch(e){cont.innerHTML='<div class="error-banner">Error: '+e.message+'</div>';}
 }
 document.getElementById('btn-nuevo-rep').addEventListener('click',()=>{document.getElementById('m-rep-nombre').value='';document.getElementById('m-rep-err').style.display='none';abrirModal('modal-rep');});
 document.getElementById('m-rep-cancel').addEventListener('click',()=>cerrarModal('modal-rep'));
@@ -599,7 +599,10 @@ async function renderCuentas(){
     const body=div.querySelector('.cuenta-body');
     body.appendChild(pagoDiv);
     cont.appendChild(div);
-  }catch(e){cont.innerHTML=`<div class="error-banner">Error al cargar cuentas: ${e.message}</div>`;}
+  }catch(e){
+    const msg=e.message||'Error desconocido';
+    cont.innerHTML='<div class="error-banner">Error al cargar cuentas: '+msg+'</div>';
+  }
 }
 async function renderHistorial(){
   const cont=document.getElementById('hist-contenido');cont.innerHTML='<div class="loading">Cargando...</div>';
@@ -628,7 +631,7 @@ async function renderHistorial(){
     html+=`<div class="hist-mes"><div class="hist-mes-header" onclick="this.nextElementSibling.classList.toggle('open')"><span class="hist-mes-titulo">${tituloMes}</span><span class="hist-mes-total">${fmt(totalMes)} €</span></div><div class="hist-mes-body"><div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border)">${panesMesTot}</div>${diasHtml}</div></div>`;
   }
   cont.innerHTML=hayDatos?html:'<div class="empty"><div class="empty-icon">📋</div>Sin historial aún.<br><small style="font-size:12px">Cierra una jornada para empezar a ver el historial.</small></div>';
-  }catch(e){cont.innerHTML=`<div class="error-banner">Error al cargar el historial: ${e.message}</div>`;}
+  }catch(e){cont.innerHTML='<div class="error-banner">Error al cargar el historial: '+e.message+'</div>';}
 }
 
 // TABS
