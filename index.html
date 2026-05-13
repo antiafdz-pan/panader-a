@@ -582,7 +582,13 @@ async function renderCuentas(){
       return `<div class="cuenta-dia"><div><div class="cuenta-dia-fecha">${labelFecha(d.fecha)}</div><div class="cuenta-dia-panes">${[panesStr,extrasStr].filter(Boolean).join(' · ')}</div></div><span class="cuenta-dia-importe">${fmt(d.importe)} €</span></div>`;
     }).join('');
     const div=document.createElement('div');div.className='cuenta-card';
-    div.innerHTML=`<div class="cuenta-header" onclick="this.nextElementSibling.classList.toggle('open')"><span class="cuenta-nombre">${cuenta.cliente_nombre}${moroso?' ⚠':''}</span><span class="cuenta-deuda ${moroso?'deuda-red':'deuda-warn'}">${fmt(cuenta.total)} €</span></div><div class="cuenta-body">${diasHtml}</div>`;
+    const cuentaHeader=document.createElement('div');cuentaHeader.className='cuenta-header';
+    cuentaHeader.innerHTML='<span class="cuenta-nombre">'+cuenta.cliente_nombre+(moroso?' ⚠':'')+'</span><span class="cuenta-deuda '+(moroso?'deuda-red':'deuda-warn')+'">'+fmt(cuenta.total)+' €</span>';
+    cuentaHeader.addEventListener('click',()=>cuentaBody.classList.toggle('open'));
+    const cuentaBody=document.createElement('div');cuentaBody.className='cuenta-body';
+    cuentaBody.innerHTML=diasHtml;
+    div.appendChild(cuentaHeader);
+    div.appendChild(cuentaBody);
     const btnPagado=document.createElement('button');
     btnPagado.className='btn btn-sm btn-success';
     btnPagado.textContent='Marcar pagado ✓';
@@ -609,7 +615,7 @@ async function renderCuentas(){
 async function renderHistorial(){
   const cont=document.getElementById('hist-contenido');cont.innerHTML='<div class="loading">Cargando...</div>';
   try{
-  const hoy=new Date();let html='';let hayDatos=false;
+  const hoy=new Date();let hayDatos=false;
   for(let i=0;i<6;i++){
     const d=new Date(hoy.getFullYear(),hoy.getMonth()-i,1);
     const dFin=new Date(hoy.getFullYear(),hoy.getMonth()-i+1,0);
@@ -630,9 +636,16 @@ async function renderHistorial(){
       const devolStr=PANES.filter(p=>dd[p.key]>0).map(p=>`<span class="pan-chip" style="background:var(--green-light);color:var(--green);border-color:var(--green)">↩${p.key}:${dd[p.key]}</span>`).join('');
       return `<div class="hist-dia"><div><div class="hist-dia-fecha">${labelFecha(j.fecha)}</div><div class="hist-dia-panes">${panesStr}${devolStr}</div></div><span class="hist-dia-total">${fmt(tot)} €</span></div>`;
     }).join('');
-    html+=`<div class="hist-mes"><div class="hist-mes-header" onclick="this.nextElementSibling.classList.toggle('open')"><span class="hist-mes-titulo">${tituloMes}</span><span class="hist-mes-total">${fmt(totalMes)} €</span></div><div class="hist-mes-body"><div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border)">${panesMesTot}</div>${diasHtml}</div></div>`;
+    const mesDiv=document.createElement('div');mesDiv.className='hist-mes';
+    const mesHeader=document.createElement('div');mesHeader.className='hist-mes-header';
+    mesHeader.innerHTML='<span class="hist-mes-titulo">'+tituloMes+'</span><span class="hist-mes-total">'+fmt(totalMes)+' €</span>';
+    const mesBody=document.createElement('div');mesBody.className='hist-mes-body';
+    mesBody.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border)">'+panesMesTot+'</div>'+diasHtml;
+    mesHeader.addEventListener('click',()=>mesBody.classList.toggle('open'));
+    mesDiv.appendChild(mesHeader);mesDiv.appendChild(mesBody);
+    cont.appendChild(mesDiv);
   }
-  cont.innerHTML=hayDatos?html:'<div class="empty"><div class="empty-icon">📋</div>Sin historial aún.<br><small style="font-size:12px">Cierra una jornada para empezar a ver el historial.</small></div>';
+  if(!hayDatos)cont.innerHTML='<div class="empty"><div class="empty-icon">📋</div>Sin historial aún.<br><small style="font-size:12px">Cierra una jornada para empezar a ver el historial.</small></div>';
   }catch(e){cont.innerHTML='<div class="error-banner">Error al cargar el historial: '+e.message+'</div>';}
 }
 
