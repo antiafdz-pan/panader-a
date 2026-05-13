@@ -683,7 +683,34 @@ document.getElementById('btn-cerrar-jornada').addEventListener('click',async()=>
     }
   }
   if(window._jid)await dbUpdate('jornadas',window._jid,{cerrada:true,clientes_data:jornada,devols_dia:devolsDia});
+  const jornada_cerrada=[...jornada];
   jornada=[];window._jid=null;renderReparto();renderFijos();comprobarAlertas();
+
+  // enviar resumen por WhatsApp automáticamente
+  const hoy2=new Date();
+  const fecha2=hoy2.getDate()+' de '+MESES[hoy2.getMonth()];
+  let msg='🍞 *Reparto '+repActual.nombre+' — '+fecha2+'*\n\n';
+  const jornadaCerrada=jornada_cerrada;
+  jornadaCerrada.forEach(c=>{
+    const total=totalCliente(c);
+    const panes=PANES.filter(p=>c.qtys[p.key]>0).map(p=>c.qtys[p.key]+' '+p.key).join(', ');
+    const extras=(c.extras||[]).filter(ex=>ex.desc||ex.precio).map(ex=>(ex.desc||'Extra')+' '+fmt(ex.precio||0)+' €').join(', ');
+    const devols=PANES.filter(p=>(c.devols&&c.devols[p.key]>0)).map(p=>'↩'+c.devols[p.key]+' '+p.key).join(', ');
+    msg+='• *'+c.nombre+'*: '+[panes,extras].filter(Boolean).join(' + ')+(devols?' (dev: '+devols+')':'')+' = '+fmt(total)+' €'+(c.pagaHoy?'':' 📋 cuenta')+'\n';
+  });
+  const totPanes2={};PANES.forEach(p=>totPanes2[p.key]=0);
+  jornadaCerrada.forEach(c=>PANES.forEach(p=>totPanes2[p.key]+=c.qtys[p.key]));
+  const totDevols2={};PANES.forEach(p=>totDevols2[p.key]=0);
+  jornadaCerrada.forEach(c=>PANES.forEach(p=>totDevols2[p.key]+=(c.devols&&c.devols[p.key])||0));
+  msg+='\n📦 *Total panes:* '+PANES.filter(p=>totPanes2[p.key]>0).map(p=>totPanes2[p.key]+' '+p.key).join(', ');
+  const totDevolStr2=PANES.filter(p=>totDevols2[p.key]>0).map(p=>totDevols2[p.key]+' '+p.key).join(', ');
+  if(totDevolStr2)msg+='\n↩ *Devoluciones:* '+totDevolStr2;
+  const totalCobrado2=jornadaCerrada.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
+  const totalCuenta2=jornadaCerrada.filter(c=>!c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
+  msg+='\n💰 *Cobrado:* '+fmt(totalCobrado2)+' €';
+  if(totalCuenta2>0)msg+='\n📋 *A cuenta:* '+fmt(totalCuenta2)+' €';
+  window.open('https://wa.me/34982530063?text='+encodeURIComponent(msg),'_blank');
+
   alert('✓ Jornada guardada correctamente.');
 });
 
