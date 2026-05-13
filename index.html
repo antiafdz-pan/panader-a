@@ -195,6 +195,11 @@ details[open] summary span:last-child{transform:rotate(90deg);display:inline-blo
         <div class="sum-row"><span>AG – Art. grande</span><span class="sum-val" id="r-AG">0</span></div>
         <div class="sum-row"><span>Pallarina</span><span class="sum-val" id="r-PA">0</span></div>
         <div class="sum-total"><span class="sum-total-label">Cobrado hoy</span><span class="sum-total-val" id="r-total">0,00 €</span></div>
+        <div style="border-top:1.5px solid var(--border);margin-top:10px;padding-top:10px">
+          <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Gastos y pagos del repartidor</div>
+          <div id="gastos-lista"></div>
+          <button class="btn btn-sm" id="btn-add-gasto" style="width:100%;border-style:dashed;color:var(--muted);margin-top:4px">+ Añadir gasto o pago</button>
+        </div>
         <div style="border-top:1.5px solid var(--green-light);margin-top:10px;padding-top:10px">
           <div style="font-size:12px;font-weight:600;color:var(--green);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Devoluciones recogidas</div>
           <div class="sum-row"><span>G devueltas</span><span class="sum-val" id="d-G">0</span></div>
@@ -218,6 +223,31 @@ details[open] summary span:last-child{transform:rotate(90deg);display:inline-blo
         <button class="btn btn-sm btn-primary" id="btn-nuevo-cliente-guardado">+ Nuevo cliente</button>
       </div>
       <div id="lista-clientes-guardados"><div class="loading">Cargando...</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: añadir gasto -->
+<div class="modal-bg" id="modal-gasto">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <h3>Añadir gasto o pago</h3>
+    <div class="field"><label>Tipo</label>
+      <select id="gasto-tipo">
+        <option value="gasto">💸 Gasto (pagué de mi bolsillo)</option>
+        <option value="entrega">💰 Entrego dinero en tienda</option>
+      </select>
+    </div>
+    <div class="field"><label>Descripción</label>
+      <input id="gasto-desc" placeholder="Ej: Gasolina, parking, cobro de Juan..."/>
+    </div>
+    <div class="field"><label>Importe (€)</label>
+      <input type="number" id="gasto-importe" placeholder="0,00" min="0" step="0.01"/>
+    </div>
+    <div class="err" id="gasto-err"></div>
+    <div class="modal-btns">
+      <button class="btn btn-full" id="gasto-cancel">Cancelar</button>
+      <button class="btn btn-full btn-primary" id="gasto-ok">Añadir</button>
     </div>
   </div>
 </div>
@@ -364,6 +394,66 @@ function abrirModal(id){document.getElementById(id).classList.add('open');}
 function cerrarModal(id){document.getElementById(id).classList.remove('open');}
 document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open');}));
 
+// GASTOS
+let gastos=[];
+
+function renderGastos(){
+  const cont=document.getElementById('gastos-lista');
+  if(!cont)return;
+  cont.innerHTML='';
+  if(!gastos.length){
+    cont.innerHTML='<div style="font-size:13px;color:var(--muted);padding:4px 0">Sin gastos registrados</div>';
+    return;
+  }
+  gastos.forEach((g,i)=>{
+    const div=document.createElement('div');
+    div.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px';
+    const icono=g.tipo==='gasto'?'💸':'💰';
+    div.innerHTML='<div><span style="margin-right:4px">'+icono+'</span><span style="color:var(--text)">'+g.desc+'</span></div><div style="display:flex;align-items:center;gap:8px"><span style="font-weight:600;color:'+(g.tipo==='gasto'?'var(--red)':'var(--green)')+'">'+fmt(g.importe)+' €</span><button style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0" data-gi="'+i+'">×</button></div>';
+    cont.appendChild(div);
+  });
+  // total gastos y entregas
+  const totalGastos=gastos.filter(g=>g.tipo==='gasto').reduce((s,g)=>s+g.importe,0);
+  const totalEntregas=gastos.filter(g=>g.tipo==='entrega').reduce((s,g)=>s+g.importe,0);
+  if(gastos.length>0){
+    const resumen=document.createElement('div');
+    resumen.style.cssText='margin-top:8px;padding-top:8px;font-size:13px';
+    if(totalGastos>0)resumen.innerHTML+='<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Total gastos míos</span><span style="font-weight:600;color:var(--red)">'+fmt(totalGastos)+' €</span></div>';
+    if(totalEntregas>0)resumen.innerHTML+='<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Total entrego en tienda</span><span style="font-weight:600;color:var(--green)">'+fmt(totalEntregas)+' €</span></div>';
+    cont.appendChild(resumen);
+  }
+  cont.querySelectorAll('[data-gi]').forEach(btn=>{
+    btn.addEventListener('click',async()=>{
+      gastos.splice(parseInt(btn.dataset.gi),1);
+      await guardarGastosDB();renderGastos();
+    });
+  });
+}
+
+async function guardarGastosDB(){
+  if(!window._jid)return;
+  await dbUpdate('jornadas',window._jid,{gastos_data:gastos});
+}
+
+document.getElementById('btn-add-gasto').addEventListener('click',()=>{
+  document.getElementById('gasto-desc').value='';
+  document.getElementById('gasto-importe').value='';
+  document.getElementById('gasto-err').style.display='none';
+  abrirModal('modal-gasto');
+});
+document.getElementById('gasto-cancel').addEventListener('click',()=>cerrarModal('modal-gasto'));
+document.getElementById('gasto-ok').addEventListener('click',async()=>{
+  const tipo=document.getElementById('gasto-tipo').value;
+  const desc=document.getElementById('gasto-desc').value.trim();
+  const importe=parseFloat(document.getElementById('gasto-importe').value);
+  const err=document.getElementById('gasto-err');
+  if(!desc){err.textContent='Escribe una descripción';err.style.display='block';return;}
+  if(isNaN(importe)||importe<=0){err.textContent='Escribe un importe válido';err.style.display='block';return;}
+  gastos.push({tipo,desc,importe});
+  cerrarModal('modal-gasto');
+  await guardarGastosDB();renderGastos();
+});
+
 // WHATSAPP
 document.getElementById('btn-whatsapp').addEventListener('click',()=>{
   if(!jornada.length){alert('No hay clientes en el reparto de hoy.');return;}
@@ -507,9 +597,9 @@ async function entrarReparto(rep){
   clientesGuardados=await dbGet('clientes','order=nombre.asc');
   const hoy=hoyISO();
   const jornadas=await dbGet('jornadas',`repartidor_id=eq.${rep.id}&fecha=eq.${hoy}&cerrada=eq.false`);
-  if(jornadas.length){jornada=jornadas[0].clientes_data||[];window._jid=jornadas[0].id;}
-  else{jornada=[];window._jid=null;}
-  renderFijos();renderReparto();comprobarAlertas();
+  if(jornadas.length){jornada=jornadas[0].clientes_data||[];window._jid=jornadas[0].id;gastos=jornadas[0].gastos_data||[];}
+  else{jornada=[];window._jid=null;gastos=[];}
+  renderFijos();renderReparto();renderGastos();comprobarAlertas();
 }
 
 function renderFijos(){
@@ -682,9 +772,10 @@ document.getElementById('btn-cerrar-jornada').addEventListener('click',async()=>
       }else{await dbInsert('cuentas',{cliente_id:cid,cliente_nombre:c.nombre,total:importe,dias:[nuevoDia]});}
     }
   }
-  if(window._jid)await dbUpdate('jornadas',window._jid,{cerrada:true,clientes_data:jornada,devols_dia:devolsDia});
+  if(window._jid)await dbUpdate('jornadas',window._jid,{cerrada:true,clientes_data:jornada,devols_dia:devolsDia,gastos_data:gastos});
   const jornada_cerrada=[...jornada];
-  jornada=[];window._jid=null;renderReparto();renderFijos();comprobarAlertas();
+  jornada=[];gastos=[];window._jid=null;
+  renderReparto();renderFijos();renderGastos();comprobarAlertas();
 
   // enviar resumen por WhatsApp automáticamente
   const hoy2=new Date();
@@ -709,6 +800,15 @@ document.getElementById('btn-cerrar-jornada').addEventListener('click',async()=>
   const totalCuenta2=jornadaCerrada.filter(c=>!c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
   msg+='\n💰 *Cobrado:* '+fmt(totalCobrado2)+' €';
   if(totalCuenta2>0)msg+='\n📋 *A cuenta:* '+fmt(totalCuenta2)+' €';
+  const gastosData=gastos;
+  const totalGastos2=gastosData.filter(g=>g.tipo==='gasto').reduce((s,g)=>s+g.importe,0);
+  const totalEntregas2=gastosData.filter(g=>g.tipo==='entrega').reduce((s,g)=>s+g.importe,0);
+  if(gastosData.length){
+    msg+='\n\n💸 *Gastos y pagos:*';
+    gastosData.forEach(g=>msg+='\n'+(g.tipo==='gasto'?'💸':'💰')+' '+g.desc+': '+fmt(g.importe)+' €');
+    if(totalGastos2>0)msg+='\n📤 *Me deben reembolsar:* '+fmt(totalGastos2)+' €';
+    if(totalEntregas2>0)msg+='\n📥 *Entrego en tienda:* '+fmt(totalEntregas2)+' €';
+  }
   window.open('https://wa.me/34982530063?text='+encodeURIComponent(msg),'_blank');
 
   alert('✓ Jornada guardada correctamente.');
