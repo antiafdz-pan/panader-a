@@ -11,7 +11,6 @@
 <meta name="apple-mobile-web-app-title" content="Panadería"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <link rel="apple-touch-icon" href="/icon.svg"/>
-<link rel="manifest" href="/manifest.json"/>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap');
 :root{
@@ -1407,12 +1406,12 @@ function abrirModalCG(cg){
   diasWrap.style.display=fijoSel.value==='si'?'block':'none';
   fijoSel.onchange=function(){diasWrap.style.display=this.value==='si'?'block':'none';};
   document.getElementById('mcg-err').style.display='none';
-  const grid=document.getElementById('precios-grid');grid.innerHTML='';
+  const preciosGrid=document.getElementById('precios-grid');preciosGrid.innerHTML='';
   PANES.forEach(p=>{
     const val=cg&&cg.precios&&cg.precios[p.key]!=null?cg.precios[p.key]:'';
     const f=document.createElement('div');f.className='field';
     f.innerHTML=`<label>${p.nombre}</label><input type="number" step="0.01" min="0" id="mcg-p-${p.key}" placeholder="${p.precio.toFixed(2)}" value="${val}"/>`;
-    grid.appendChild(f);
+    preciosGrid.appendChild(f);
   });
   const btns=document.getElementById('mcg-btns');btns.innerHTML='';
   if(cg){const d=document.createElement('button');d.className='btn';d.style.color='var(--red)';d.textContent='Eliminar';d.addEventListener('click',eliminarCG);btns.appendChild(d);}
