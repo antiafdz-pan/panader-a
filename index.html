@@ -217,7 +217,14 @@ details[open] summary span:last-child{transform:rotate(90deg);display:inline-blo
       </div>
     </div>
     <div id="panel-cuentas" style="display:none"><div id="cuentas-contenido"><div class="loading">Cargando...</div></div></div>
-    <div id="panel-historial" style="display:none"><div id="hist-contenido"><div class="empty"><div class="empty-icon">📋</div>Sin historial aún</div></div></div>
+    <div id="panel-historial" style="display:none">
+      <div style="display:flex;gap:4px;margin-bottom:1rem;background:var(--border);padding:3px;border-radius:var(--radius-sm)">
+        <button class="tab active" id="subtab-dias" onclick="switchSubtab('dias')">Por días</button>
+        <button class="tab" id="subtab-clientes-hist" onclick="switchSubtab('clientes-hist')">Por clientes</button>
+      </div>
+      <div id="subpanel-dias"><div id="hist-contenido"><div class="empty"><div class="empty-icon">📋</div>Sin historial aún</div></div></div>
+      <div id="subpanel-clientes-hist" style="display:none"><div id="hist-clientes-contenido"><div class="empty"><div class="empty-icon">👥</div>Sin datos aún</div></div></div>
+    </div>
     <div id="panel-clientes-g" style="display:none">
       <div style="display:flex;justify-content:flex-end;margin-bottom:1rem">
         <button class="btn btn-sm btn-primary" id="btn-nuevo-cliente-guardado">+ Nuevo cliente</button>
@@ -929,7 +936,90 @@ async function renderHistorial(){
 // TABS
 function switchTab(tab){
   ['hoy','cuentas','historial','clientes-g'].forEach(t=>{document.getElementById('panel-'+t).style.display=t===tab?'block':'none';document.getElementById('tab-'+t).classList.toggle('active',t===tab);});
-  if(tab==='cuentas')renderCuentas();if(tab==='historial')renderHistorial();if(tab==='clientes-g')renderClientesGuardados();
+  if(tab==='cuentas')renderCuentas();
+  if(tab==='historial'){renderHistorial();switchSubtab('dias');}
+  if(tab==='clientes-g')renderClientesGuardados();
+}
+
+function switchSubtab(sub){
+  ['dias','clientes-hist'].forEach(t=>{
+    document.getElementById('subpanel-'+t).style.display=t===sub?'block':'none';
+    const btn=document.getElementById('subtab-'+t);if(btn)btn.classList.toggle('active',t===sub);
+  });
+  if(sub==='clientes-hist')renderConsumoClientes();
+}
+
+async function renderConsumoClientes(){
+  const cont=document.getElementById('hist-clientes-contenido');
+  cont.innerHTML='<div class="loading">Cargando...</div>';
+  try{
+    const hoy=new Date();
+    // selector de mes
+    const meses=[];
+    for(let i=0;i<6;i++){
+      const d=new Date(hoy.getFullYear(),hoy.getMonth()-i,1);
+      meses.push({label:MESES[d.getMonth()]+' '+d.getFullYear(),year:d.getFullYear(),month:d.getMonth()});
+    }
+    let html='<div style="margin-bottom:1rem"><select id="sel-mes-consumo" style="height:40px;font-size:14px">';
+    meses.forEach((m,i)=>html+='<option value="'+i+'">'+m.label+'</option>');
+    html+='</select></div><div id="consumo-tabla"></div>';
+    cont.innerHTML=html;
+    document.getElementById('sel-mes-consumo').addEventListener('change',function(){
+      cargarConsumoMes(meses[parseInt(this.value)]);
+    });
+    cargarConsumoMes(meses[0]);
+  }catch(e){cont.innerHTML='<div class="error-banner">Error: '+e.message+'</div>';}
+}
+
+async function cargarConsumoMes(mes){
+  const tabla=document.getElementById('consumo-tabla');
+  if(!tabla)return;
+  tabla.innerHTML='<div class="loading">Cargando...</div>';
+  const d=new Date(mes.year,mes.month,1);
+  const dFin=new Date(mes.year,mes.month+1,0);
+  const desde=mes.year+'-'+String(mes.month+1).padStart(2,'0')+'-01';
+  const hasta=mes.year+'-'+String(mes.month+1).padStart(2,'0')+'-'+String(dFin.getDate()).padStart(2,'0');
+  const jornadas=await dbGet('jornadas','repartidor_id=eq.'+repActual.id+'&fecha=gte.'+desde+'&fecha=lte.'+hasta+'&cerrada=eq.true');
+  if(!jornadas.length){tabla.innerHTML='<div class="empty">Sin datos este mes</div>';return;}
+
+  // agrupar por cliente
+  const porCliente={};
+  jornadas.forEach(j=>{
+    const cls=j.clientes_data||[];
+    cls.forEach(c=>{
+      const key=c.clienteId?'cg_'+c.clienteId:'m_'+c.nombre;
+      if(!porCliente[key]){porCliente[key]={nombre:c.nombre,dias:0,panes:{},total:0,totalCuenta:0};}
+      PANES.forEach(p=>porCliente[key].panes[p.key]=(porCliente[key].panes[p.key]||0)+c.qtys[p.key]);
+      const imp=totalCliente(c);
+      porCliente[key].total+=imp;
+      if(!c.pagaHoy)porCliente[key].totalCuenta+=imp;
+      porCliente[key].dias++;
+    });
+  });
+
+  const clientes=Object.values(porCliente).sort((a,b)=>b.total-a.total);
+  if(!clientes.length){tabla.innerHTML='<div class="empty">Sin datos este mes</div>';return;}
+
+  tabla.innerHTML='';
+  clientes.forEach(c=>{
+    const panesStr=PANES.filter(p=>c.panes[p.key]>0).map(p=>'<span class="pan-chip">'+p.key+': '+c.panes[p.key]+'</span>').join('');
+    const div=document.createElement('div');
+    div.style.cssText='background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:8px';
+    div.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+      +'<span style="font-size:15px;font-weight:600">'+c.nombre+'</span>'
+      +'<span style="font-size:16px;font-weight:700;color:var(--accent)">'+fmt(c.total)+' €</span>'
+      +'</div>'
+      +'<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:5px">'+panesStr+'</div>'
+      +'<div style="font-size:12px;color:var(--muted)">'+c.dias+' días · '+(c.totalCuenta>0?'<span style="color:var(--red)">'+fmt(c.totalCuenta)+' € pendiente</span>':'Al día ✓')+'</div>';
+    tabla.appendChild(div);
+  });
+
+  // total del mes
+  const totalMes=clientes.reduce((s,c)=>s+c.total,0);
+  const resumen=document.createElement('div');
+  resumen.style.cssText='background:var(--accent-light);border-radius:var(--radius-sm);padding:12px 14px;margin-top:4px;display:flex;justify-content:space-between;align-items:center';
+  resumen.innerHTML='<span style="font-size:14px;font-weight:600;color:var(--accent-text)">Total '+mes.label+'</span><span style="font-size:20px;font-weight:700;color:var(--accent)">'+fmt(totalMes)+' €</span>';
+  tabla.appendChild(resumen);
 }
 
 // CLIENTES GUARDADOS
