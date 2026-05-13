@@ -4,6 +4,14 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0"/>
 <title>Panadería — Reparto</title>
+<meta name="description" content="App de reparto para panadería"/>
+<meta name="theme-color" content="#c8441a"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+<meta name="apple-mobile-web-app-title" content="Panadería"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<link rel="apple-touch-icon" href="/icon.svg"/>
+<link rel="manifest" href="/manifest.json"/>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap');
 :root{
@@ -214,7 +222,7 @@ details[open] summary span:last-child{transform:rotate(90deg);display:inline-blo
           <div class="sum-row"><span>Pallarina devueltas</span><span class="sum-val" id="d-PA">0</span></div>
         </div>
       </div>
-      <button class="btn btn-full btn-primary" id="btn-cerrar-jornada" style="margin-bottom:.5rem">Cerrar jornada y guardar</button>
+      <button class="btn btn-full btn-primary" id="btn-cerrar-jornada" style="margin-bottom:.5rem">🧾 Arqueo y cerrar jornada</button>
       <div style="display:flex;gap:8px;margin-bottom:.75rem">
         <button class="btn btn-full" id="btn-whatsapp" style="background:var(--green-light);color:var(--green);border-color:var(--green)">📲 Enviar por WhatsApp</button>
         <button class="btn btn-full" id="btn-cambio">💰 Calcular cambio</button>
@@ -234,6 +242,39 @@ details[open] summary span:last-child{transform:rotate(90deg);display:inline-blo
         <button class="btn btn-sm btn-primary" id="btn-nuevo-cliente-guardado">+ Nuevo cliente</button>
       </div>
       <div id="lista-clientes-guardados"><div class="loading">Cargando...</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: arqueo de caja -->
+<div class="modal-bg" id="modal-arqueo">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <h3>🧾 Arqueo de caja</h3>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:1rem">Cuenta el efectivo que tienes y comprueba si cuadra</p>
+
+    <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Billetes</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:1rem" id="billetes-grid"></div>
+
+    <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Monedas</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:1rem" id="monedas-grid"></div>
+
+    <div style="background:var(--bg);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:1rem">
+      <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-bottom:4px">
+        <span>Total contado</span><span id="arqueo-contado" style="font-weight:600;color:var(--text)">0,00 €</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-bottom:4px">
+        <span>Debería haber cobrado</span><span id="arqueo-esperado" style="font-weight:600;color:var(--text)">0,00 €</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:600;border-top:1px solid var(--border);padding-top:8px;margin-top:4px">
+        <span>Diferencia</span>
+        <span id="arqueo-diferencia" style="font-size:18px;font-weight:700">0,00 €</span>
+      </div>
+    </div>
+
+    <div class="modal-btns">
+      <button class="btn btn-full" id="arqueo-cancel">Cancelar</button>
+      <button class="btn btn-full btn-primary" id="arqueo-ok">Cerrar jornada ✓</button>
     </div>
   </div>
 </div>
@@ -614,8 +655,26 @@ async function entrarReparto(rep){
   clientesGuardados=await dbGet('clientes','order=nombre.asc');
   const hoy=hoyISO();
   const jornadas=await dbGet('jornadas',`repartidor_id=eq.${rep.id}&fecha=eq.${hoy}&cerrada=eq.false`);
-  if(jornadas.length){jornada=jornadas[0].clientes_data||[];window._jid=jornadas[0].id;gastos=jornadas[0].gastos_data||[];}
-  else{jornada=[];window._jid=null;gastos=[];}
+  if(jornadas.length){
+    jornada=jornadas[0].clientes_data||[];
+    window._jid=jornadas[0].id;
+    gastos=jornadas[0].gastos_data||[];
+    window._jornadaCerrada=jornadas[0].cerrada||false;
+  }
+  else{jornada=[];window._jid=null;gastos=[];window._jornadaCerrada=false;}
+  // bloquear edición si ya está cerrada
+  document.getElementById('btn-cerrar-jornada').style.display=window._jornadaCerrada?'none':'block';
+  document.getElementById('btn-whatsapp').style.display=window._jornadaCerrada?'none':'flex';
+  document.getElementById('btn-cambio').style.display=window._jornadaCerrada?'none':'flex';
+  document.getElementById('btn-add-gasto').style.display=window._jornadaCerrada?'none':'block';
+  document.getElementById('fijos-section').dataset.bloqueado=window._jornadaCerrada?'1':'0';
+  if(window._jornadaCerrada){
+    document.getElementById('inp-cliente').disabled=true;
+    document.getElementById('btn-abrir-modal-cliente').disabled=true;
+  }else{
+    document.getElementById('inp-cliente').disabled=false;
+    document.getElementById('btn-abrir-modal-cliente').disabled=false;
+  }
   renderFijos();renderReparto();renderGastos();comprobarAlertas();
 }
 
@@ -658,6 +717,13 @@ async function comprobarAlertas(){
 // RENDER REPARTO
 function renderReparto(){
   const lista=document.getElementById('lista-clientes');lista.innerHTML='';
+  // banner si la jornada está cerrada
+  if(window._jornadaCerrada){
+    const banner=document.createElement('div');
+    banner.style.cssText='background:var(--warn-light);color:var(--warn);border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;font-weight:500;margin-bottom:1rem;text-align:center';
+    banner.textContent='🔒 Jornada cerrada — solo lectura';
+    lista.appendChild(banner);
+  }
   if(!jornada.length){lista.innerHTML='<div class="empty"><div class="empty-icon">🛵</div>Añade el primer cliente del reparto</div>';}
   jornada.forEach(c=>{
     const esEspecial=tieneEspecial(c);const total=totalCliente(c);
@@ -842,10 +908,78 @@ document.addEventListener('click',async e=>{
   });
 });
 
-// CERRAR JORNADA
-document.getElementById('btn-cerrar-jornada').addEventListener('click',async()=>{
+// ARQUEO DE CAJA
+const BILLETES=[500,200,100,50,20,10,5];
+const MONEDAS=[2,1,0.50,0.20,0.10,0.05,0.02,0.01];
+const arqueoData={};
+
+function iniciarArqueo(){
+  [...BILLETES,...MONEDAS].forEach(v=>arqueoData[v]=0);
+  // construir grids
+  const bg=document.getElementById('billetes-grid');
+  const mg=document.getElementById('monedas-grid');
+  bg.innerHTML='';mg.innerHTML='';
+  BILLETES.forEach(v=>bg.appendChild(crearArqueoFila(v,'€')));
+  MONEDAS.forEach(v=>mg.appendChild(crearArqueoFila(v,'€')));
+  actualizarArqueo();
+}
+
+function crearArqueoFila(valor,_){
+  const label=valor>=1?valor+'€':(valor*100).toFixed(0)+'c';
+  const div=document.createElement('div');
+  div.style.cssText='background:var(--bg);border-radius:var(--radius-sm);padding:8px 10px;display:flex;align-items:center;justify-content:space-between;gap:6px';
+  div.innerHTML='<span style="font-size:13px;font-weight:600;min-width:36px">'+label+'</span>'
+    +'<div style="display:flex;align-items:center;gap:4px">'
+    +'<button style="width:24px;height:24px;border-radius:50%;border:1.5px solid var(--border);background:var(--card);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center" data-arq="'+valor+'" data-op="dec">−</button>'
+    +'<span style="font-size:14px;font-weight:600;min-width:20px;text-align:center" id="arq-n-'+valor.toString().replace('.','_')+'">0</span>'
+    +'<button style="width:24px;height:24px;border-radius:50%;border:1.5px solid var(--border);background:var(--card);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center" data-arq="'+valor+'" data-op="inc">+</button>'
+    +'</div>'
+    +'<span style="font-size:12px;color:var(--muted);min-width:44px;text-align:right" id="arq-s-'+valor.toString().replace('.','_')+'">0,00 €</span>';
+  return div;
+}
+
+function actualizarArqueo(){
+  let total=0;
+  [...BILLETES,...MONEDAS].forEach(v=>{
+    const n=arqueoData[v]||0;
+    const sub=parseFloat((v*n).toFixed(2));
+    total+=sub;
+    const nEl=document.getElementById('arq-n-'+v.toString().replace('.','_'));
+    const sEl=document.getElementById('arq-s-'+v.toString().replace('.','_'));
+    if(nEl)nEl.textContent=n;
+    if(sEl)sEl.textContent=fmt(sub)+' €';
+  });
+  const esperado=jornada.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
+  const diferencia=parseFloat((total-esperado).toFixed(2));
+  document.getElementById('arqueo-contado').textContent=fmt(total)+' €';
+  document.getElementById('arqueo-esperado').textContent=fmt(esperado)+' €';
+  const difEl=document.getElementById('arqueo-diferencia');
+  difEl.textContent=(diferencia>=0?'+':'')+fmt(diferencia)+' €';
+  difEl.style.color=diferencia===0?'var(--green)':diferencia>0?'var(--warn)':'var(--red)';
+}
+
+document.getElementById('modal-arqueo').addEventListener('click',e=>{
+  const btn=e.target.closest('[data-arq]');if(!btn)return;
+  const v=parseFloat(btn.dataset.arq);
+  const op=btn.dataset.op;
+  if(op==='inc')arqueoData[v]=(arqueoData[v]||0)+1;
+  else if(op==='dec'&&arqueoData[v]>0)arqueoData[v]--;
+  actualizarArqueo();
+});
+
+document.getElementById('btn-cerrar-jornada').addEventListener('click',()=>{
   if(!jornada.length){alert('No hay nada que guardar hoy.');return;}
-  if(!confirm('¿Cerrar la jornada de hoy? Se guardará en el historial.'))return;
+  iniciarArqueo();
+  abrirModal('modal-arqueo');
+});
+document.getElementById('arqueo-cancel').addEventListener('click',()=>cerrarModal('modal-arqueo'));
+document.getElementById('arqueo-ok').addEventListener('click',async()=>{
+  cerrarModal('modal-arqueo');
+  await ejecutarCierreJornada();
+});
+
+// CERRAR JORNADA
+async function ejecutarCierreJornada(){
   const hoy=hoyISO();
   const panesDia={};PANES.forEach(p=>panesDia[p.key]=0);
   jornada.forEach(c=>PANES.forEach(p=>panesDia[p.key]+=c.qtys[p.key]));
@@ -869,15 +1003,20 @@ document.getElementById('btn-cerrar-jornada').addEventListener('click',async()=>
   }
   if(window._jid)await dbUpdate('jornadas',window._jid,{cerrada:true,clientes_data:jornada,devols_dia:devolsDia,gastos_data:gastos});
   const jornada_cerrada=[...jornada];
+  const gastos_cerrados=[...gastos];
   jornada=[];gastos=[];window._jid=null;
   renderReparto();renderFijos();renderGastos();comprobarAlertas();
+
+  // incluir arqueo en WhatsApp
+  const totalContado=[...BILLETES,...MONEDAS].reduce((s,v)=>s+v*(arqueoData[v]||0),0);
+  const esperado=jornada_cerrada.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
+  const diferencia=parseFloat((totalContado-esperado).toFixed(2));
 
   // enviar resumen por WhatsApp automáticamente
   const hoy2=new Date();
   const fecha2=hoy2.getDate()+' de '+MESES[hoy2.getMonth()];
   let msg='🍞 *Reparto '+repActual.nombre+' — '+fecha2+'*\n\n';
-  const jornadaCerrada=jornada_cerrada;
-  jornadaCerrada.forEach(c=>{
+  jornada_cerrada.forEach(c=>{
     const total=totalCliente(c);
     const panes=PANES.filter(p=>c.qtys[p.key]>0).map(p=>c.qtys[p.key]+' '+p.key).join(', ');
     const extras=(c.extras||[]).filter(ex=>ex.desc||ex.precio).map(ex=>(ex.desc||'Extra')+' '+fmt(ex.precio||0)+' €').join(', ');
@@ -885,29 +1024,30 @@ document.getElementById('btn-cerrar-jornada').addEventListener('click',async()=>
     msg+='• *'+c.nombre+'*: '+[panes,extras].filter(Boolean).join(' + ')+(devols?' (dev: '+devols+')':'')+' = '+fmt(total)+' €'+(c.pagaHoy?'':' 📋 cuenta')+'\n';
   });
   const totPanes2={};PANES.forEach(p=>totPanes2[p.key]=0);
-  jornadaCerrada.forEach(c=>PANES.forEach(p=>totPanes2[p.key]+=c.qtys[p.key]));
+  jornada_cerrada.forEach(c=>PANES.forEach(p=>totPanes2[p.key]+=c.qtys[p.key]));
   const totDevols2={};PANES.forEach(p=>totDevols2[p.key]=0);
-  jornadaCerrada.forEach(c=>PANES.forEach(p=>totDevols2[p.key]+=(c.devols&&c.devols[p.key])||0));
+  jornada_cerrada.forEach(c=>PANES.forEach(p=>totDevols2[p.key]+=(c.devols&&c.devols[p.key])||0));
   msg+='\n📦 *Total panes:* '+PANES.filter(p=>totPanes2[p.key]>0).map(p=>totPanes2[p.key]+' '+p.key).join(', ');
   const totDevolStr2=PANES.filter(p=>totDevols2[p.key]>0).map(p=>totDevols2[p.key]+' '+p.key).join(', ');
   if(totDevolStr2)msg+='\n↩ *Devoluciones:* '+totDevolStr2;
-  const totalCobrado2=jornadaCerrada.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
-  const totalCuenta2=jornadaCerrada.filter(c=>!c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
+  const totalCobrado2=jornada_cerrada.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
+  const totalCuenta2=jornada_cerrada.filter(c=>!c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
   msg+='\n💰 *Cobrado:* '+fmt(totalCobrado2)+' €';
   if(totalCuenta2>0)msg+='\n📋 *A cuenta:* '+fmt(totalCuenta2)+' €';
-  const gastosData=gastos;
-  const totalGastos2=gastosData.filter(g=>g.tipo==='gasto').reduce((s,g)=>s+g.importe,0);
-  const totalEntregas2=gastosData.filter(g=>g.tipo==='entrega').reduce((s,g)=>s+g.importe,0);
-  if(gastosData.length){
+  if(gastos_cerrados.length){
+    const totalGastos2=gastos_cerrados.filter(g=>g.tipo==='gasto').reduce((s,g)=>s+g.importe,0);
+    const totalEntregas2=gastos_cerrados.filter(g=>g.tipo==='entrega').reduce((s,g)=>s+g.importe,0);
     msg+='\n\n💸 *Gastos y pagos:*';
-    gastosData.forEach(g=>msg+='\n'+(g.tipo==='gasto'?'💸':'💰')+' '+g.desc+': '+fmt(g.importe)+' €');
+    gastos_cerrados.forEach(g=>msg+='\n'+(g.tipo==='gasto'?'💸':'💰')+' '+g.desc+': '+fmt(g.importe)+' €');
     if(totalGastos2>0)msg+='\n📤 *Me deben reembolsar:* '+fmt(totalGastos2)+' €';
     if(totalEntregas2>0)msg+='\n📥 *Entrego en tienda:* '+fmt(totalEntregas2)+' €';
   }
+  msg+='\n\n🧾 *Arqueo de caja:*';
+  msg+='\nContado: '+fmt(totalContado)+' € | Esperado: '+fmt(esperado)+' €';
+  msg+='\nDiferencia: '+(diferencia>=0?'+':'')+fmt(diferencia)+' €'+(diferencia===0?' ✅':diferencia>0?' ⚠️ sobra':' ❌ falta');
   window.open('https://wa.me/34982530063?text='+encodeURIComponent(msg),'_blank');
-
   alert('✓ Jornada guardada correctamente.');
-});
+}
 
 // MODAL CLIENTE REPARTO
 document.getElementById('btn-abrir-modal-cliente').addEventListener('click',()=>abrirModalCliente(document.getElementById('inp-cliente').value.trim()));
@@ -1229,6 +1369,28 @@ async function eliminarCG(){
 
 document.getElementById('btn-logout').addEventListener('click',()=>{repActual=null;jornada=[];showScreen('s-login');renderLogin();});
 renderLogin();
+
+// SERVICE WORKER para PWA
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('/sw.js').catch(()=>{});
+}
+
+// BANNER DE INSTALACIÓN
+let deferredPrompt=null;
+window.addEventListener('beforeinstallprompt',e=>{
+  e.preventDefault();deferredPrompt=e;
+  // mostrar banner solo si no está instalada
+  const banner=document.createElement('div');
+  banner.style.cssText='position:fixed;bottom:1rem;left:1rem;right:1rem;background:var(--accent);color:#fff;border-radius:var(--radius);padding:14px 16px;display:flex;align-items:center;justify-content:space-between;z-index:200;box-shadow:0 4px 20px rgba(0,0,0,.2)';
+  banner.innerHTML='<div><div style="font-weight:600;font-size:15px">📱 Instalar app</div><div style="font-size:12px;opacity:.85;margin-top:2px">Acceso directo desde tu móvil</div></div><div style="display:flex;gap:8px"><button id="btn-instalar-no" style="background:rgba(255,255,255,.2);border:none;color:#fff;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:13px">Ahora no</button><button id="btn-instalar-si" style="background:#fff;border:none;color:var(--accent);padding:8px 14px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">Instalar</button></div>';
+  document.body.appendChild(banner);
+  document.getElementById('btn-instalar-si').addEventListener('click',async()=>{
+    banner.remove();deferredPrompt.prompt();
+    const{outcome}=await deferredPrompt.userChoice;
+    deferredPrompt=null;
+  });
+  document.getElementById('btn-instalar-no').addEventListener('click',()=>banner.remove());
+});
 </script>
 </body>
 </html>
