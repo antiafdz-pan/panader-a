@@ -887,22 +887,22 @@ document.getElementById('lista-clientes').addEventListener('input',async e=>{
   clearTimeout(el._t);el._t=setTimeout(async()=>{await guardarJornadaDB();},1500);
 });
 
-// cerrar details al pulsar fuera de la tarjeta
+// cerrar details al pulsar fuera de la tarjeta — solo si no estamos escribiendo
 document.addEventListener('click',async e=>{
-  const card=e.target.closest('.card');
-  document.getElementById('lista-clientes').querySelectorAll('details[open]').forEach(async details=>{
-    if(!details.closest('.card').contains(e.target)){
-      details.removeAttribute('open');
-      // actualizar resumen compacto
-      const c2=jornada.find(x=>details.querySelector('[data-id="'+x.id+'"]'));
-      if(c2){
-        const chipsWrap=details.closest('.card').querySelector('.card-header div div:last-child');
-        if(chipsWrap){
-          const rp=PANES.filter(p=>c2.qtys[p.key]>0).map(p=>'<span style="background:var(--bg);border:1px solid var(--border);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;color:var(--text)">'+c2.qtys[p.key]+' '+p.key+'</span>').join('');
-          const tdv=PANES.reduce((s,p)=>s+((c2.devols&&c2.devols[p.key])||0),0);
-          const rd=tdv>0?'<span style="background:var(--green-light);border:1px solid var(--green);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;color:var(--green)">↩ '+tdv+'</span>':'';
-          chipsWrap.innerHTML=rp+rd;
-        }
+  // no cerrar si estamos dentro de un input o textarea
+  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT')return;
+  // no cerrar si pulsamos un botón dentro de un details
+  if(e.target.closest('details'))return;
+  document.getElementById('lista-clientes').querySelectorAll('details[open]').forEach(details=>{
+    details.removeAttribute('open');
+    const c2=jornada.find(x=>details.querySelector('[data-id="'+x.id+'"]'));
+    if(c2){
+      const chipsWrap=details.closest('.card').querySelector('.card-header div div:last-child');
+      if(chipsWrap){
+        const rp=PANES.filter(p=>c2.qtys[p.key]>0).map(p=>'<span style="background:var(--bg);border:1px solid var(--border);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;color:var(--text)">'+c2.qtys[p.key]+' '+p.key+'</span>').join('');
+        const tdv=PANES.reduce((s,p)=>s+((c2.devols&&c2.devols[p.key])||0),0);
+        const rd=tdv>0?'<span style="background:var(--green-light);border:1px solid var(--green);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;color:var(--green)">↩ '+tdv+'</span>':'';
+        chipsWrap.innerHTML=rp+rd;
       }
     }
   });
@@ -915,40 +915,56 @@ const arqueoData={};
 
 function iniciarArqueo(){
   [...BILLETES,...MONEDAS].forEach(v=>arqueoData[v]=0);
-  // construir grids
   const bg=document.getElementById('billetes-grid');
   const mg=document.getElementById('monedas-grid');
   bg.innerHTML='';mg.innerHTML='';
-  BILLETES.forEach(v=>bg.appendChild(crearArqueoFila(v,'€')));
-  MONEDAS.forEach(v=>mg.appendChild(crearArqueoFila(v,'€')));
+  BILLETES.forEach(v=>bg.appendChild(crearArqueoFila(v,false)));
+  MONEDAS.forEach(v=>mg.appendChild(crearArqueoFila(v,true)));
   actualizarArqueo();
 }
 
-function crearArqueoFila(valor,_){
+function crearArqueoFila(valor,esMoneda){
   const label=valor>=1?valor+'€':(valor*100).toFixed(0)+'c';
+  const key=valor.toString().replace('.','_');
   const div=document.createElement('div');
-  div.style.cssText='background:var(--bg);border-radius:var(--radius-sm);padding:8px 10px;display:flex;align-items:center;justify-content:space-between;gap:6px';
-  div.innerHTML='<span style="font-size:13px;font-weight:600;min-width:36px">'+label+'</span>'
-    +'<div style="display:flex;align-items:center;gap:4px">'
-    +'<button style="width:24px;height:24px;border-radius:50%;border:1.5px solid var(--border);background:var(--card);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center" data-arq="'+valor+'" data-op="dec">−</button>'
-    +'<span style="font-size:14px;font-weight:600;min-width:20px;text-align:center" id="arq-n-'+valor.toString().replace('.','_')+'">0</span>'
-    +'<button style="width:24px;height:24px;border-radius:50%;border:1.5px solid var(--border);background:var(--card);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center" data-arq="'+valor+'" data-op="inc">+</button>'
-    +'</div>'
-    +'<span style="font-size:12px;color:var(--muted);min-width:44px;text-align:right" id="arq-s-'+valor.toString().replace('.','_')+'">0,00 €</span>';
+  div.style.cssText='background:var(--bg);border-radius:var(--radius-sm);padding:8px 10px;display:flex;align-items:center;gap:8px';
+
+  if(esMoneda){
+    // monedas: input de importe total directo
+    div.innerHTML='<span style="font-size:13px;font-weight:600;min-width:32px">'+label+'</span>'
+      +'<input type="number" id="arq-inp-'+key+'" min="0" step="0.01" placeholder="0,00 €" style="height:36px;font-size:13px;flex:1" />'
+      +'<span style="font-size:11px;color:var(--muted);min-width:10px">€</span>';
+    div.querySelector('input').addEventListener('input',function(){
+      arqueoData[valor]=parseFloat(this.value)||0;
+      actualizarArqueo();
+    });
+  } else {
+    // billetes: botones +/− con cantidad
+    div.innerHTML='<span style="font-size:13px;font-weight:600;min-width:36px">'+label+'</span>'
+      +'<button style="width:26px;height:26px;border-radius:50%;border:1.5px solid var(--border);background:var(--card);cursor:pointer;font-size:15px" data-arq="'+valor+'" data-op="dec">−</button>'
+      +'<span style="font-size:14px;font-weight:600;min-width:20px;text-align:center" id="arq-n-'+key+'">0</span>'
+      +'<button style="width:26px;height:26px;border-radius:50%;border:1.5px solid var(--border);background:var(--card);cursor:pointer;font-size:15px" data-arq="'+valor+'" data-op="inc">+</button>'
+      +'<span style="font-size:12px;color:var(--muted);min-width:46px;text-align:right" id="arq-s-'+key+'">0,00 €</span>';
+  }
   return div;
 }
 
 function actualizarArqueo(){
   let total=0;
-  [...BILLETES,...MONEDAS].forEach(v=>{
+  BILLETES.forEach(v=>{
     const n=arqueoData[v]||0;
     const sub=parseFloat((v*n).toFixed(2));
     total+=sub;
-    const nEl=document.getElementById('arq-n-'+v.toString().replace('.','_'));
-    const sEl=document.getElementById('arq-s-'+v.toString().replace('.','_'));
+    const key=v.toString().replace('.','_');
+    const nEl=document.getElementById('arq-n-'+key);
+    const sEl=document.getElementById('arq-s-'+key);
     if(nEl)nEl.textContent=n;
     if(sEl)sEl.textContent=fmt(sub)+' €';
   });
+  MONEDAS.forEach(v=>{
+    total+=parseFloat((arqueoData[v]||0).toFixed(2));
+  });
+  total=parseFloat(total.toFixed(2));
   const esperado=jornada.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
   const diferencia=parseFloat((total-esperado).toFixed(2));
   document.getElementById('arqueo-contado').textContent=fmt(total)+' €';
