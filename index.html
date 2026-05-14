@@ -978,6 +978,7 @@ function iniciarDragDrop(){
 
 document.getElementById('lista-clientes').addEventListener('click',async e=>{
   const btn=e.target.closest('[data-id]');if(!btn)return;
+  e.stopPropagation(); // evitar que el click cierre el details
   const id=btn.dataset.id;const c=jornada.find(x=>x.id===id);if(!c)return;
   const action=btn.dataset.action;
   if(action==='del'){
