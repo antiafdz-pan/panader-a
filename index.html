@@ -844,7 +844,7 @@ function renderReparto(){
     const panesHtml=PANES.map(p=>{
       const precio=precioCliente(c,p.key);const normal=PANES.find(x=>x.key===p.key).precio;
       const esDif=esEspecial&&precio!==normal;const activo=c.qtys[p.key]>0;
-      return `<div class="pan-row"><div class="pan-info"><div class="pan-nombre">${p.nombre}</div><div class="pan-precio${esDif?' especial':''}">${fmt(precio)} €${esDif?' ★':''}</div></div><div class="qty-ctrl"><button class="qb${activo?' on':''}" data-id="${c.id}" data-key="${p.key}" data-action="dec">−</button><span class="qn">${c.qtys[p.key]}</span><button class="qb${activo?' on':''}" data-id="${c.id}" data-key="${p.key}" data-action="inc">+</button></div></div>`;
+      return `<div class="pan-row"><div class="pan-info"><div class="pan-nombre">${p.nombre}</div><div class="pan-precio${esDif?' especial':''}">${fmt(precio)} €${esDif?' ★':''}</div></div><div class="qty-ctrl"><button class="qb${activo?' on':''}" data-id="${c.id}" data-key="${p.key}" data-action="dec">−</button><span class="qn" data-key="${p.key}">${c.qtys[p.key]}</span><button class="qb${activo?' on':''}" data-id="${c.id}" data-key="${p.key}" data-action="inc">+</button></div></div>`;
     }).join('');
     const extras=c.extras||[];
     const extrasHtml=extras.map((ex,i)=>`<div class="extra-item"><input class="extra-nota" type="text" placeholder="Ej: Empanada de atún" value="${ex.desc||''}" data-id="${c.id}" data-ei="${i}" data-field="desc"/><input class="extra-precio" type="number" step="0.01" min="0" placeholder="€" value="${ex.precio||''}" data-id="${c.id}" data-ei="${i}" data-field="precio"/><button class="extra-del" data-id="${c.id}" data-ei="${i}" data-action="del-extra">×</button></div>`).join('');
@@ -885,12 +885,8 @@ function renderReparto(){
   document.getElementById('resumen').style.display=jornada.length?'block':'none';
   document.getElementById('badge-clientes').textContent=jornada.length;
   document.getElementById('r-nc').textContent=jornada.length;
-  PANES.forEach(p=>{const el=document.getElementById('r-'+p.key);if(el)el.textContent=jornada.reduce((s,c)=>s+c.qtys[p.key],0);});
-  PANES.forEach(p=>{const el=document.getElementById('d-'+p.key);if(el)el.textContent=jornada.reduce((s,c)=>s+((c.devols&&c.devols[p.key])||0),0);});
-  const tot=jornada.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
-  document.getElementById('r-total').textContent=fmt(tot)+' €';
+  actualizarResumenGlobal();
   iniciarDragDrop();
-  // actualizar stock si está visible
   if(document.getElementById('panel-stock').style.display!=='none')renderStockPanel();
 }
 
@@ -1011,7 +1007,49 @@ document.getElementById('lista-clientes').addEventListener('click',async e=>{
       if(PANES.reduce((s,p)=>s+c.qtys[p.key],0)===0)c.horaEntrega=null;
     }
   }
-  await guardarJornadaDB();renderReparto();
+  await guardarJornadaDB();
+
+  // para add/del-extra y devol necesitamos re-renderizar la tarjeta
+  const needsFullRender=['add-extra','del-extra','devol-inc','devol-dec'];
+  if(needsFullRender.includes(action)){
+    renderReparto();
+    return;
+  }
+
+  // para +/− solo actualizamos los elementos afectados sin cerrar el panel
+  const card=document.querySelector('.card[data-id="'+id+'"]');
+  if(card){
+    // actualizar cantidad en el botón
+    const qnEl=card.querySelector('.qn[data-key="'+btn.dataset.key+'"]')||
+               card.querySelector('span.qn');
+    // actualizar todos los qn de esta tarjeta
+    PANES.forEach(p=>{
+      const qnEls=card.querySelectorAll('[data-key="'+p.key+'"]');
+      qnEls.forEach(el=>{
+        if(el.classList.contains('qn'))el.textContent=c.qtys[p.key];
+      });
+      // actualizar color del botón
+      card.querySelectorAll('.qb[data-key="'+p.key+'"]').forEach(b=>{
+        if(c.qtys[p.key]>0)b.classList.add('on');else b.classList.remove('on');
+      });
+    });
+    // actualizar total en cabecera
+    const amEl=card.querySelector('.card-amount');
+    if(amEl)amEl.textContent=fmt(totalCliente(c))+' €';
+    // actualizar resumen de chips en cabecera
+    const chipsWrap=card.querySelector('.card-header div div:last-child');
+    if(chipsWrap){
+      const rp=PANES.filter(p=>c.qtys[p.key]>0).map(p=>'<span style="background:var(--bg);border:1px solid var(--border);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;color:var(--text)">'+c.qtys[p.key]+' '+p.key+'</span>').join('');
+      const tdv=PANES.reduce((s,p)=>s+((c.devols&&c.devols[p.key])||0),0);
+      const rd=tdv>0?'<span style="background:var(--green-light);border:1px solid var(--green);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;color:var(--green)">↩ '+tdv+'</span>':'';
+      chipsWrap.innerHTML=rp+rd;
+    }
+    // actualizar hora entrega si cambió
+    const horaEl=card.querySelector('.hora-entrega');
+    if(horaEl)horaEl.textContent=c.horaEntrega?'🕐 '+c.horaEntrega:'';
+  }
+  // actualizar resumen global
+  actualizarResumenGlobal();
 });
 
 document.getElementById('lista-clientes').addEventListener('input',async e=>{
@@ -1024,6 +1062,16 @@ document.getElementById('lista-clientes').addEventListener('input',async e=>{
   // guardar en DB con debounce largo, sin re-renderizar
   clearTimeout(el._t);el._t=setTimeout(async()=>{await guardarJornadaDB();},1500);
 });
+
+function actualizarResumenGlobal(){
+  document.getElementById('resumen').style.display=jornada.length?'block':'none';
+  document.getElementById('badge-clientes').textContent=jornada.length;
+  document.getElementById('r-nc').textContent=jornada.length;
+  PANES.forEach(p=>{const el=document.getElementById('r-'+p.key);if(el)el.textContent=jornada.reduce((s,c)=>s+c.qtys[p.key],0);});
+  PANES.forEach(p=>{const el=document.getElementById('d-'+p.key);if(el)el.textContent=jornada.reduce((s,c)=>s+((c.devols&&c.devols[p.key])||0),0);});
+  const tot=jornada.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
+  document.getElementById('r-total').textContent=fmt(tot)+' €';
+}
 
 // toggle editar cantidades
 document.getElementById('lista-clientes').addEventListener('click',e=>{
