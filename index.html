@@ -555,7 +555,7 @@ document.getElementById('gasto-ok').addEventListener('click',async()=>{
 
 // WHATSAPP
 document.getElementById('btn-whatsapp').addEventListener('click',()=>{
-  if(!jornada.length){alert('No hay clientes en el reparto de hoy.');return;}
+  if(!jornada.length){mostrarToast('No hay clientes en el reparto de hoy');return;}
   const hoy=new Date();
   const fecha=hoy.getDate()+' de '+MESES[hoy.getMonth()];
   let msg='🍞 *Reparto '+repActual.nombre+' — '+fecha+'*\n\n';
@@ -678,7 +678,7 @@ async function cargarPanelJefe(){
         });
         html+='</div>';
       }
-      if(arq){
+      if(arq&&arq.diferencia!=null&&!isNaN(arq.diferencia)){
         const difColor=arq.diferencia===0?'var(--green)':arq.diferencia>0?'var(--warn)':'var(--red)';
         const difStr=arq.diferencia===0?'✅ Cuadra':arq.diferencia>0?'⚠️ Sobran '+fmt(arq.diferencia)+' €':'❌ Faltan '+fmt(Math.abs(arq.diferencia))+' €';
         html+='<div style="background:var(--bg);border-radius:var(--radius-sm);padding:8px 10px;display:flex;justify-content:space-between;align-items:center">';
@@ -698,8 +698,8 @@ async function cargarPanelJefe(){
           const totH=clsH.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
           const panesTot=PANES.map(p=>({key:p.key,n:clsH.reduce((s,c)=>s+(c.qtys[p.key]||0),0)})).filter(p=>p.n>0).map(p=>p.n+' '+p.key).join(', ')||'—';
           const aqH=jh.arqueo;
-          const difColor2=aqH?(aqH.diferencia===0?'var(--green)':aqH.diferencia>0?'var(--warn)':'var(--red)'):'var(--muted)';
-          const difStr2=aqH?(aqH.diferencia===0?'✅':(aqH.diferencia>0?'⚠️ +':'❌ ')+fmt(Math.abs(aqH.diferencia))+' €'):'—';
+          const difColor2=aqH&&aqH.diferencia!=null&&!isNaN(aqH.diferencia)?(aqH.diferencia===0?'var(--green)':aqH.diferencia>0?'var(--warn)':'var(--red)'):'var(--muted)';
+          const difStr2=aqH&&aqH.diferencia!=null&&!isNaN(aqH.diferencia)?(aqH.diferencia===0?'✅':(aqH.diferencia>0?'⚠️ +':'❌ ')+fmt(Math.abs(aqH.diferencia))+' €'):'Sin arqueo';
           html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">';
           html+='<div><div style="font-weight:500">'+labelFecha(jh.fecha)+'</div><div style="font-size:11px;color:var(--muted)">'+panesTot+'</div></div>';
           html+='<div style="text-align:right"><div style="font-weight:600;color:var(--accent)">'+fmt(totH)+' €</div><div style="font-size:11px;color:'+difColor2+'">'+difStr2+'</div></div>';
@@ -759,12 +759,16 @@ async function entrarReparto(rep){
   const jornadas=await dbGet('jornadas',`repartidor_id=eq.${rep.id}&fecha=eq.${hoy}&cerrada=eq.false`);
   if(jornadas.length){
     jornada=jornadas[0].clientes_data||[];
-    window._jid=jornadas[0].id;
+    window._jid=jornadas[0].id;  // siempre restaurar _jid
     gastos=jornadas[0].gastos_data||[];
     stockSalida=jornadas[0].stock_salida||{};
-    window._jornadaCerrada=jornadas[0].cerrada||false;
+    window._jornadaCerrada=false;
   }
-  else{jornada=[];window._jid=null;gastos=[];stockSalida={};window._jornadaCerrada=false;}
+  else{
+    jornada=[];window._jid=null;gastos=[];
+    stockSalida={};  // siempre resetear stock para día nuevo
+    window._jornadaCerrada=false;
+  }
   // bloquear edición si ya está cerrada
   document.getElementById('btn-cerrar-jornada').style.display=window._jornadaCerrada?'none':'block';
   document.getElementById('btn-whatsapp').style.display=window._jornadaCerrada?'none':'flex';
@@ -976,7 +980,17 @@ document.getElementById('lista-clientes').addEventListener('click',async e=>{
   const btn=e.target.closest('[data-id]');if(!btn)return;
   const id=btn.dataset.id;const c=jornada.find(x=>x.id===id);if(!c)return;
   const action=btn.dataset.action;
-  if(action==='del'){jornada=jornada.filter(x=>x.id!==id);}
+  if(action==='del'){
+    const clienteEliminado=jornada.find(x=>x.id===id);
+    jornada=jornada.filter(x=>x.id!==id);
+    await guardarJornadaDB();renderReparto();
+    // mostrar toast con opción de deshacer
+    mostrarToast('Cliente eliminado','Deshacer',async()=>{
+      jornada.push(clienteEliminado);
+      await guardarJornadaDB();renderReparto();
+    });
+    return;
+  }
   else if(action==='add-extra'){if(!c.extras)c.extras=[];c.extras.push({desc:'',precio:''});}
   else if(action==='del-extra'){c.extras.splice(parseInt(btn.dataset.ei),1);}
   else if(action==='devol-inc'){if(!c.devols)c.devols={};c.devols[btn.dataset.key]=(c.devols[btn.dataset.key]||0)+1;}
@@ -991,7 +1005,11 @@ document.getElementById('lista-clientes').addEventListener('click',async e=>{
         c.horaEntrega=String(ahora.getHours()).padStart(2,'0')+':'+String(ahora.getMinutes()).padStart(2,'0');
       }
     }
-    else if(action==='dec'&&c.qtys[key]>0)c.qtys[key]--;
+    else if(action==='dec'&&c.qtys[key]>0){
+      c.qtys[key]--;
+      // borrar hora de entrega si se queda sin nada
+      if(PANES.reduce((s,p)=>s+c.qtys[p.key],0)===0)c.horaEntrega=null;
+    }
   }
   await guardarJornadaDB();renderReparto();
 });
@@ -1105,15 +1123,28 @@ document.getElementById('modal-arqueo').addEventListener('click',e=>{
 
 document.getElementById('monedas-total').addEventListener('input',actualizarArqueo);
 
-document.getElementById('btn-cerrar-jornada').addEventListener('click',()=>{
-  if(!jornada.length){alert('No hay nada que guardar hoy.');return;}
-  iniciarArqueo();
-  abrirModal('modal-arqueo');
-});
-document.getElementById('arqueo-cancel').addEventListener('click',()=>cerrarModal('modal-arqueo'));
+// TOAST con deshacer
+function mostrarToast(msg,btnLabel,onUndo){
+  document.querySelectorAll('.toast-el').forEach(t=>t.remove());
+  const toast=document.createElement('div');
+  toast.className='toast-el';
+  toast.style.cssText='position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);background:#1a1714;color:#fff;border-radius:var(--radius-sm);padding:10px 16px;font-size:14px;display:flex;align-items:center;gap:12px;z-index:300;box-shadow:0 4px 16px rgba(0,0,0,.3);white-space:nowrap';
+  toast.innerHTML=msg+(onUndo?'<button style="background:none;border:none;color:var(--accent-light);font-size:14px;font-weight:600;cursor:pointer;padding:0">'+btnLabel+'</button>':'');
+  if(onUndo)toast.querySelector('button').addEventListener('click',()=>{toast.remove();onUndo();});
+  document.body.appendChild(toast);
+  setTimeout(()=>toast.remove(),4000);
+}
+
+// guardar valor de monedas antes de cerrar modal
 document.getElementById('arqueo-ok').addEventListener('click',async()=>{
+  window._monedasArqueo=parseFloat(document.getElementById('monedas-total').value)||0;
   cerrarModal('modal-arqueo');
   await ejecutarCierreJornada();
+});
+document.getElementById('btn-cerrar-jornada').addEventListener('click',()=>{
+  if(!jornada.length){mostrarToast('No hay nada que guardar hoy');return;}
+  iniciarArqueo();
+  abrirModal('modal-arqueo');
 });
 
 // CERRAR JORNADA
@@ -1141,7 +1172,7 @@ async function ejecutarCierreJornada(){
   }
   // calcular arqueo
   const totalBilletes=BILLETES.reduce((s,v)=>s+v*(arqueoData[v]||0),0);
-  const totalMonedas=parseFloat(document.getElementById('monedas-total').value)||0;
+  const totalMonedas=window._monedasArqueo||0;
   const totalContadoArqueo=parseFloat((totalBilletes+totalMonedas).toFixed(2));
   const esperadoArqueo=jornada.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
   const diferenciaArqueo=parseFloat((totalContadoArqueo-esperadoArqueo).toFixed(2));
@@ -1200,7 +1231,7 @@ async function ejecutarCierreJornada(){
   const stockSalidaStr=PANES.filter(p=>stockSalidaCerrado[p.key]>0).map(p=>stockSalidaCerrado[p.key]+' '+p.key).join(', ');
   if(stockSalidaStr)msg+='\n\n📦 *Stock salida:* '+stockSalidaStr;
   window.open('https://wa.me/34982530063?text='+encodeURIComponent(msg),'_blank');
-  alert('✓ Jornada guardada correctamente.');
+  mostrarToast('✓ Jornada guardada correctamente');
 }
 
 // MODAL CLIENTE REPARTO
@@ -1301,7 +1332,7 @@ async function renderCuentas(){
           // registrar pago
           await dbInsert('pagos',{cliente_nombre:cuenta.cliente_nombre,cliente_id:cuenta.cliente_id||null,importe:dataMes.total,fecha:hoyISO()});
           renderCuentas();comprobarAlertas();
-        }catch(e){alert('Error: '+e.message);}
+        }catch(e){mostrarToast('Error: '+e.message);}
       });
       mesCuerpo.appendChild(btnMes);
       mesDiv.appendChild(mesHeader);
@@ -1338,7 +1369,7 @@ async function renderCuentas(){
         await dbInsert('pagos',{cliente_nombre:cuenta.cliente_nombre,cliente_id:cuenta.cliente_id||null,importe:cuenta.total,fecha:hoyISO()});
         await dbUpdate('cuentas',cuenta.id,{total:0,dias:[],updated_at:new Date().toISOString()});
         renderCuentas();comprobarAlertas();
-      }catch(e){alert('Error: '+e.message);}
+      }catch(e){mostrarToast('Error: '+e.message);}
     });
     pagoDiv.appendChild(btnTodo);
     cuentaBody.appendChild(pagoDiv);
@@ -1468,7 +1499,7 @@ document.getElementById('btn-guardar-salida').addEventListener('click',async()=>
   } else {
     await dbUpdate('jornadas',window._jid,{stock_salida:stockSalida});
   }
-  alert('✓ Stock guardado');
+  mostrarToast('✓ Stock guardado');
 });
 
 // TABS
