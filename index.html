@@ -288,7 +288,11 @@ details[open] summary span:last-child{transform:rotate(90deg);display:inline-blo
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:1rem" id="billetes-grid"></div>
 
     <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Monedas</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:1rem" id="monedas-grid"></div>
+    <div style="background:var(--bg);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:1rem;display:flex;align-items:center;gap:12px">
+      <span style="font-size:13px;color:var(--muted);flex:1">Total en monedas</span>
+      <input type="number" id="monedas-total" min="0" step="0.01" placeholder="0,00" style="height:40px;font-size:16px;font-weight:600;text-align:right;width:110px"/>
+      <span style="font-size:14px;color:var(--muted)">€</span>
+    </div>
 
     <div style="background:var(--bg);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:1rem">
       <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-bottom:4px">
@@ -622,53 +626,90 @@ document.getElementById('btn-panel-jefe').addEventListener('click',()=>{
 });
 document.getElementById('pass-jefe-cancel').addEventListener('click',()=>cerrarModal('modal-pass-jefe'));
 document.getElementById('inp-pass-jefe').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('pass-jefe-ok').click();});
-document.getElementById('pass-jefe-ok').addEventListener('click',()=>{
+document.getElementById('pass-jefe-ok').addEventListener('click',async()=>{
   const pass=document.getElementById('inp-pass-jefe').value;
   const err=document.getElementById('pass-jefe-err');
-  if(pass!=='Pan982530063'){err.textContent='Contraseña incorrecta';err.style.display='block';return;}
-  cerrarModal('modal-pass-jefe');
-  abrirModal('modal-jefe');
-  cargarPanelJefe();
+  err.style.display='none';
+  try{
+    const res=await dbGet('config','clave=eq.pass_jefe');
+    const passCorrecta=res&&res[0]?res[0].valor:'Pan982530063';
+    if(pass!==passCorrecta){err.textContent='Contraseña incorrecta';err.style.display='block';return;}
+    cerrarModal('modal-pass-jefe');
+    abrirModal('modal-jefe');
+    cargarPanelJefe();
+  }catch(e){err.textContent='Error al verificar';err.style.display='block';}
 });
 async function cargarPanelJefe(){
   const cont=document.getElementById('jefe-contenido');
   cont.innerHTML='<div class="loading">Cargando...</div>';
   try{
     const reps=await dbGet('repartidores','order=nombre.asc');
-    const hoy=new Date().toISOString().split('T')[0];
+    const hoy=hoyISO();
     const cuentas=await dbGet('cuentas','total=gt.0&order=total.desc');
     const totalDeuda=cuentas.reduce((s,c)=>s+c.total,0);
-    let html='<div style="background:var(--accent-light);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:1rem">';
+    let html='';
+    // resumen deudas
+    html+='<div style="background:var(--accent-light);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:1rem">';
     html+='<div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Total pendiente de cobro</div>';
     html+='<div style="font-size:28px;font-weight:700;color:var(--accent)">'+fmt(totalDeuda)+' €</div>';
     html+='<div style="font-size:12px;color:var(--muted);margin-top:2px">'+cuentas.length+' clientes con deuda</div></div>';
-    html+='<div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Repartos de hoy</div>';
+    // cada repartidor
     for(const rep of reps){
-      const jornadas=await dbGet('jornadas','repartidor_id=eq.'+rep.id+'&fecha=eq.'+hoy+'&order=created_at.desc');
-      const j=jornadas.length?jornadas[0]:null;
+      const jornadasHoy=await dbGet('jornadas','repartidor_id=eq.'+rep.id+'&fecha=eq.'+hoy+'&order=created_at.desc');
+      const j=jornadasHoy.length?jornadasHoy[0]:null;
       const cls=j?j.clientes_data||[]:[];
       const totalHoy=cls.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
       const panesDia={};PANES.forEach(p=>panesDia[p.key]=0);
       cls.forEach(c=>PANES.forEach(p=>panesDia[p.key]+=c.qtys[p.key]||0));
       const panesStr=PANES.filter(p=>panesDia[p.key]>0).map(p=>panesDia[p.key]+' '+p.key).join(', ')||'Sin datos';
       const estado=j&&j.cerrada?'✅ Cerrada':j?'🟡 En curso':'⚪ Sin empezar';
-      html+='<div style="background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:8px">';
-      html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
-      html+='<span style="font-size:15px;font-weight:600">'+rep.nombre+'</span>';
-      html+='<span style="font-size:13px">'+estado+'</span></div>';
+      const arq=j&&j.arqueo?j.arqueo:null;
+      html+='<div style="background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius-sm);margin-bottom:10px;overflow:hidden">';
+      html+='<div style="background:var(--bg);padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">';
+      html+='<span style="font-size:16px;font-weight:600">'+rep.nombre+'</span><span style="font-size:13px">'+estado+'</span></div>';
+      html+='<div style="padding:12px 14px;border-bottom:1px solid var(--border)">';
+      html+='<div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Hoy</div>';
       html+='<div style="font-size:13px;color:var(--muted);margin-bottom:4px">'+panesStr+'</div>';
-      // horas de entrega por cliente
       if(cls.length){
-        html+='<div style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px">';
+        html+='<div style="font-size:15px;font-weight:700;color:var(--accent);margin-bottom:8px">'+fmt(totalHoy)+' € cobrado · '+cls.length+' clientes</div>';
+        html+='<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">';
         cls.forEach(c=>{
-          const hora=c.horaEntrega?'<span style="font-size:11px;color:var(--muted);margin-left:6px">🕐 '+c.horaEntrega+'</span>':'';
-          html+='<div style="font-size:12px;padding:2px 0;display:flex;align-items:center"><span>'+c.nombre+'</span>'+hora+'</div>';
+          html+='<span style="font-size:11px;background:var(--bg);color:var(--text);border-radius:99px;padding:2px 8px;border:1px solid var(--border)">'+c.nombre+(c.horaEntrega?' 🕐'+c.horaEntrega:'')+'</span>';
         });
         html+='</div>';
-        html+='<div style="font-size:14px;font-weight:600;color:var(--accent);margin-top:6px">'+fmt(totalHoy)+' € cobrado · '+cls.length+' clientes</div>';
+      }
+      if(arq){
+        const difColor=arq.diferencia===0?'var(--green)':arq.diferencia>0?'var(--warn)':'var(--red)';
+        const difStr=arq.diferencia===0?'✅ Cuadra':arq.diferencia>0?'⚠️ Sobran '+fmt(arq.diferencia)+' €':'❌ Faltan '+fmt(Math.abs(arq.diferencia))+' €';
+        html+='<div style="background:var(--bg);border-radius:var(--radius-sm);padding:8px 10px;display:flex;justify-content:space-between;align-items:center">';
+        html+='<span style="font-size:12px;color:var(--muted)">Arqueo: contado <b>'+fmt(arq.totalContado)+' €</b> · esperado <b>'+fmt(arq.esperado)+' €</b></span>';
+        html+='<span style="font-size:13px;font-weight:600;color:'+difColor+'">'+difStr+'</span></div>';
+      }
+      html+='</div>';
+      // historial últimos 7 días
+      const hace7=new Date();hace7.setDate(hace7.getDate()-6);
+      const desde=hace7.toISOString().split('T')[0];
+      const historial=await dbGet('jornadas','repartidor_id=eq.'+rep.id+'&fecha=gte.'+desde+'&cerrada=eq.true&order=fecha.desc');
+      if(historial.length){
+        html+='<div style="padding:12px 14px">';
+        html+='<div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Últimos 7 días</div>';
+        historial.forEach(jh=>{
+          const clsH=jh.clientes_data||[];
+          const totH=clsH.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
+          const panesTot=PANES.map(p=>({key:p.key,n:clsH.reduce((s,c)=>s+(c.qtys[p.key]||0),0)})).filter(p=>p.n>0).map(p=>p.n+' '+p.key).join(', ')||'—';
+          const aqH=jh.arqueo;
+          const difColor2=aqH?(aqH.diferencia===0?'var(--green)':aqH.diferencia>0?'var(--warn)':'var(--red)'):'var(--muted)';
+          const difStr2=aqH?(aqH.diferencia===0?'✅':(aqH.diferencia>0?'⚠️ +':'❌ ')+fmt(Math.abs(aqH.diferencia))+' €'):'—';
+          html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">';
+          html+='<div><div style="font-weight:500">'+labelFecha(jh.fecha)+'</div><div style="font-size:11px;color:var(--muted)">'+panesTot+'</div></div>';
+          html+='<div style="text-align:right"><div style="font-weight:600;color:var(--accent)">'+fmt(totH)+' €</div><div style="font-size:11px;color:'+difColor2+'">'+difStr2+'</div></div>';
+          html+='</div>';
+        });
+        html+='</div>';
       }
       html+='</div>';
     }
+    // top deudas
     if(cuentas.length){
       html+='<div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:1rem 0 8px">Top deudas</div>';
       cuentas.slice(0,5).forEach(c=>{
@@ -968,15 +1009,17 @@ document.getElementById('lista-clientes').addEventListener('input',async e=>{
 
 // cerrar details al pulsar fuera de la tarjeta — solo si no estamos escribiendo
 document.addEventListener('click',async e=>{
-  // no cerrar si estamos dentro de un input o textarea
+  // no cerrar si estamos dentro de un input, textarea o select
   if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT')return;
-  // no cerrar si pulsamos un botón dentro de un details
-  if(e.target.closest('details'))return;
+  // no cerrar si pulsamos dentro de cualquier tarjeta
+  if(e.target.closest('.card'))return;
+  // no cerrar si pulsamos dentro de un modal
+  if(e.target.closest('.modal'))return;
   document.getElementById('lista-clientes').querySelectorAll('details[open]').forEach(details=>{
     details.removeAttribute('open');
     const c2=jornada.find(x=>details.querySelector('[data-id="'+x.id+'"]'));
     if(c2){
-      const chipsWrap=details.closest('.card').querySelector('.card-header div div:last-child');
+      const chipsWrap=details.closest('.card')&&details.closest('.card').querySelector('.card-header div div:last-child');
       if(chipsWrap){
         const rp=PANES.filter(p=>c2.qtys[p.key]>0).map(p=>'<span style="background:var(--bg);border:1px solid var(--border);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;color:var(--text)">'+c2.qtys[p.key]+' '+p.key+'</span>').join('');
         const tdv=PANES.reduce((s,p)=>s+((c2.devols&&c2.devols[p.key])||0),0);
@@ -993,12 +1036,11 @@ const MONEDAS=[2,1,0.50,0.20,0.10,0.05,0.02,0.01];
 const arqueoData={};
 
 function iniciarArqueo(){
-  [...BILLETES,...MONEDAS].forEach(v=>arqueoData[v]=0);
+  BILLETES.forEach(v=>arqueoData[v]=0);
   const bg=document.getElementById('billetes-grid');
-  const mg=document.getElementById('monedas-grid');
-  bg.innerHTML='';mg.innerHTML='';
+  bg.innerHTML='';
   BILLETES.forEach(v=>bg.appendChild(crearArqueoFila(v,false)));
-  MONEDAS.forEach(v=>mg.appendChild(crearArqueoFila(v,true)));
+  document.getElementById('monedas-total').value='';
   actualizarArqueo();
 }
 
@@ -1040,10 +1082,9 @@ function actualizarArqueo(){
     if(nEl)nEl.textContent=n;
     if(sEl)sEl.textContent=fmt(sub)+' €';
   });
-  MONEDAS.forEach(v=>{
-    total+=parseFloat((arqueoData[v]||0).toFixed(2));
-  });
-  total=parseFloat(total.toFixed(2));
+  const monedaInp=document.getElementById('monedas-total');
+  const totalMonedas=monedaInp?parseFloat(monedaInp.value)||0:0;
+  total=parseFloat((total+totalMonedas).toFixed(2));
   const esperado=jornada.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
   const diferencia=parseFloat((total-esperado).toFixed(2));
   document.getElementById('arqueo-contado').textContent=fmt(total)+' €';
@@ -1061,6 +1102,8 @@ document.getElementById('modal-arqueo').addEventListener('click',e=>{
   else if(op==='dec'&&arqueoData[v]>0)arqueoData[v]--;
   actualizarArqueo();
 });
+
+document.getElementById('monedas-total').addEventListener('input',actualizarArqueo);
 
 document.getElementById('btn-cerrar-jornada').addEventListener('click',()=>{
   if(!jornada.length){alert('No hay nada que guardar hoy.');return;}
@@ -1096,7 +1139,20 @@ async function ejecutarCierreJornada(){
       }else{await dbInsert('cuentas',{cliente_id:cid,cliente_nombre:c.nombre,total:importe,dias:[nuevoDia]});}
     }
   }
-  if(window._jid)await dbUpdate('jornadas',window._jid,{cerrada:true,clientes_data:jornada,devols_dia:devolsDia,gastos_data:gastos});
+  // calcular arqueo
+  const totalBilletes=BILLETES.reduce((s,v)=>s+v*(arqueoData[v]||0),0);
+  const totalMonedas=parseFloat(document.getElementById('monedas-total').value)||0;
+  const totalContadoArqueo=parseFloat((totalBilletes+totalMonedas).toFixed(2));
+  const esperadoArqueo=jornada.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
+  const diferenciaArqueo=parseFloat((totalContadoArqueo-esperadoArqueo).toFixed(2));
+  const arqueoGuardar={
+    billetes:Object.fromEntries(BILLETES.map(v=>[v,arqueoData[v]||0])),
+    monedas:totalMonedas,
+    totalContado:totalContadoArqueo,
+    esperado:parseFloat(esperadoArqueo.toFixed(2)),
+    diferencia:diferenciaArqueo
+  };
+  if(window._jid)await dbUpdate('jornadas',window._jid,{cerrada:true,clientes_data:jornada,devols_dia:devolsDia,gastos_data:gastos,arqueo:arqueoGuardar});
   const jornada_cerrada=[...jornada];
   const gastos_cerrados=[...gastos];
   const stockSalidaCerrado={...stockSalida};
