@@ -150,7 +150,6 @@ input:focus,select:focus{border-color:var(--accent)}
 .card.dragging{opacity:0.4;border:2px dashed var(--accent)}
 .card.drag-over{border:2px solid var(--accent);transform:scale(1.01)}
 details summary::-webkit-details-marker{display:none}
-details[open] summary span:last-child{transform:rotate(90deg);display:inline-block}
 .error-banner{background:var(--red-light);color:var(--red);border-radius:var(--radius-sm);padding:12px 14px;font-size:13px;margin-bottom:1rem}
 </style>
 </head>
@@ -873,14 +872,14 @@ function renderReparto(){
         <span class="card-amount" style="margin-left:8px">${fmt(total)} €</span>
         <button class="del-btn" data-id="${c.id}" data-action="del">×</button>
       </div>
-      <details>
-        <summary style="list-style:none;padding:8px 14px;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:1px solid var(--border);background:var(--bg);text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;justify-content:space-between">
-          <span>Editar cantidades</span><span style="font-size:16px">›</span>
-        </summary>
+      <div class="card-toggle-btn" data-toggle="${c.id}" style="padding:8px 14px;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:1px solid var(--border);background:var(--bg);text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;justify-content:space-between;user-select:none">
+        <span>Editar cantidades</span><span class="toggle-arrow" style="font-size:16px;transition:transform .2s">›</span>
+      </div>
+      <div class="card-edit-panel" id="edit-${c.id}" style="display:none">
         <div class="panes-grid">${panesHtml}</div>
         <div class="extras-section"><div class="extras-title">Extras del día</div>${extrasHtml}<button class="btn-add-extra" data-id="${c.id}" data-action="add-extra">+ Añadir extra (empanada, pastel...)</button></div>
         ${seccionDevol}
-      </details>`;
+      </div>`;
     lista.appendChild(card);
   });
   document.getElementById('resumen').style.display=jornada.length?'block':'none';
@@ -1026,28 +1025,21 @@ document.getElementById('lista-clientes').addEventListener('input',async e=>{
   clearTimeout(el._t);el._t=setTimeout(async()=>{await guardarJornadaDB();},1500);
 });
 
-// cerrar details al pulsar fuera de la tarjeta — solo si no estamos escribiendo
-document.addEventListener('click',async e=>{
-  // no cerrar si estamos dentro de un input, textarea o select
-  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT')return;
-  // no cerrar si pulsamos dentro de cualquier tarjeta
-  if(e.target.closest('.card'))return;
-  // no cerrar si pulsamos dentro de un modal
-  if(e.target.closest('.modal'))return;
-  document.getElementById('lista-clientes').querySelectorAll('details[open]').forEach(details=>{
-    details.removeAttribute('open');
-    const c2=jornada.find(x=>details.querySelector('[data-id="'+x.id+'"]'));
-    if(c2){
-      const chipsWrap=details.closest('.card')&&details.closest('.card').querySelector('.card-header div div:last-child');
-      if(chipsWrap){
-        const rp=PANES.filter(p=>c2.qtys[p.key]>0).map(p=>'<span style="background:var(--bg);border:1px solid var(--border);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;color:var(--text)">'+c2.qtys[p.key]+' '+p.key+'</span>').join('');
-        const tdv=PANES.reduce((s,p)=>s+((c2.devols&&c2.devols[p.key])||0),0);
-        const rd=tdv>0?'<span style="background:var(--green-light);border:1px solid var(--green);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;color:var(--green)">↩ '+tdv+'</span>':'';
-        chipsWrap.innerHTML=rp+rd;
-      }
-    }
-  });
+// toggle editar cantidades
+document.getElementById('lista-clientes').addEventListener('click',e=>{
+  const toggleBtn=e.target.closest('[data-toggle]');
+  if(!toggleBtn)return;
+  e.stopPropagation();
+  const id=toggleBtn.dataset.toggle;
+  const panel=document.getElementById('edit-'+id);
+  const arrow=toggleBtn.querySelector('.toggle-arrow');
+  if(!panel)return;
+  const isOpen=panel.style.display!=='none';
+  panel.style.display=isOpen?'none':'block';
+  if(arrow)arrow.style.transform=isOpen?'':'rotate(90deg)';
 });
+
+// NO cerrar details automáticamente
 
 // ARQUEO DE CAJA
 const BILLETES=[500,200,100,50,20,10,5];
