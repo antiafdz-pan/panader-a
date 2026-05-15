@@ -1072,10 +1072,44 @@ document.getElementById('lista-clientes').addEventListener('click',async e=>{
   }
   await guardarJornadaDB();
 
-  // para add/del-extra y devol necesitamos re-renderizar la tarjeta
-  const needsFullRender=['add-extra','del-extra','devol-inc','devol-dec'];
+  // para add/del-extra necesitamos re-renderizar la tarjeta
+  const needsFullRender=['add-extra','del-extra'];
   if(needsFullRender.includes(action)){
     renderReparto();
+    return;
+  }
+
+  // para devol solo actualizamos los números sin cerrar el panel
+  if(action==='devol-inc'||action==='devol-dec'){
+    const card=document.querySelector('.card[data-id="'+id+'"]');
+    if(card){
+      const key=btn.dataset.key;
+      const val=(c.devols&&c.devols[key])||0;
+      // actualizar el número de devol
+      card.querySelectorAll('.dn').forEach(dn=>{
+        const parentBtn=dn.parentElement.querySelector('[data-key="'+key+'"]');
+        if(parentBtn)dn.textContent=val;
+      });
+      // buscar el span .dn correcto — está entre los botones .db con data-key
+      const dbs=card.querySelectorAll('.db[data-key="'+key+'"]');
+      if(dbs.length>=2){
+        const dnEl=dbs[0].nextElementSibling;
+        if(dnEl&&dnEl.classList.contains('dn'))dnEl.textContent=val;
+      }
+      // actualizar título de devoluciones
+      const totalDevols=PANES.reduce((s,p)=>s+((c.devols&&c.devols[p.key])||0),0);
+      const devolTitle=card.querySelector('.devol-title');
+      if(devolTitle)devolTitle.textContent='↩ Devoluciones'+(totalDevols>0?' ('+totalDevols+' uds)':'');
+      // actualizar resumen chips
+      const chipsWrap=card.querySelector('.card-header div div:last-child');
+      if(chipsWrap){
+        const rp=PANES.filter(p=>c.qtys[p.key]>0).map(p=>'<span style="background:var(--bg);border:1px solid var(--border);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;color:var(--text)">'+c.qtys[p.key]+' '+p.key+'</span>').join('');
+        const tdv=PANES.reduce((s,p)=>s+((c.devols&&c.devols[p.key])||0),0);
+        const rd=tdv>0?'<span style="background:var(--green-light);border:1px solid var(--green);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;color:var(--green)">↩ '+tdv+'</span>':'';
+        chipsWrap.innerHTML=rp+rd;
+      }
+    }
+    actualizarResumenGlobal();
     return;
   }
 
