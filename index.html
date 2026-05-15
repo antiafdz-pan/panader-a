@@ -208,9 +208,10 @@ details summary::-webkit-details-marker{display:none}
         <div class="fijo-title">Clientes fijos — pulsa para añadir</div>
         <div id="fijos-lista" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
       </div>
-      <div class="add-row">
-        <input id="inp-cliente" placeholder="Buscar o añadir cliente..."/>
+      <div class="add-row" style="position:relative">
+        <input id="inp-cliente" placeholder="Buscar o añadir cliente..." autocomplete="off"/>
         <button class="btn btn-icon btn-primary" id="btn-abrir-modal-cliente">+</button>
+        <div id="busqueda-dropdown" style="display:none;position:absolute;top:50px;left:0;right:48px;background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius-sm);z-index:50;max-height:200px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.1)"></div>
       </div>
       <div id="lista-clientes"><div class="loading">Cargando...</div></div>
       <div class="summary" id="resumen" style="display:none">
@@ -268,8 +269,9 @@ details summary::-webkit-details-marker{display:none}
       <div id="subpanel-clientes-hist" style="display:none"><div id="hist-clientes-contenido"><div class="empty"><div class="empty-icon">👥</div>Sin datos aún</div></div></div>
     </div>
     <div id="panel-clientes-g" style="display:none">
-      <div style="display:flex;justify-content:flex-end;margin-bottom:1rem">
-        <button class="btn btn-sm btn-primary" id="btn-nuevo-cliente-guardado">+ Nuevo cliente</button>
+      <div style="display:flex;gap:8px;margin-bottom:1rem">
+        <input id="inp-buscar-cliente" placeholder="🔍 Buscar cliente..." style="flex:1"/>
+        <button class="btn btn-sm btn-primary" id="btn-nuevo-cliente-guardado">+ Nuevo</button>
       </div>
       <div id="lista-clientes-guardados"><div class="loading">Cargando...</div></div>
     </div>
@@ -432,7 +434,12 @@ details summary::-webkit-details-marker{display:none}
         <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-top:4px" id="mcg-dias-grid"></div>
       </div>
     </div>
-    <div class="field"><label>¿Acepta devoluciones de pan?</label>
+    <div class="field"><label>¿Excluir del control de stock?</label>
+      <select id="mcg-stock">
+        <option value="no">No — cuenta en el stock</option>
+        <option value="si">Sí — no descontar del stock</option>
+      </select>
+    </div>
       <select id="mcg-devol">
         <option value="no">No</option>
         <option value="si">Sí, recoge devoluciones ↩</option>
@@ -647,6 +654,26 @@ async function cargarPanelJefe(){
     const cuentas=await dbGet('cuentas','total=gt.0&order=total.desc');
     const totalDeuda=cuentas.reduce((s,c)=>s+c.total,0);
     let html='';
+    // recopilar alertas de medias para todos los repartidores
+    const alertasMedia=[];
+    const hace30pre=new Date();hace30pre.setDate(hace30pre.getDate()-30);
+    const desde30pre=hace30pre.toISOString().split('T')[0];
+    for(const rep of reps){
+      const jornadasHoyPre=await dbGet('jornadas','repartidor_id=eq.'+rep.id+'&fecha=eq.'+hoy+'&cerrada=eq.true');
+      if(!jornadasHoyPre.length)continue;
+      const clsPre=jornadasHoyPre[0].clientes_data||[];
+      const totalHoyPre=clsPre.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
+      const j30=await dbGet('jornadas','repartidor_id=eq.'+rep.id+'&fecha=gte.'+desde30pre+'&fecha=lt.'+hoy+'&cerrada=eq.true');
+      const tot30=j30.map(jj=>{const cc=jj.clientes_data||[];return cc.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);}).filter(t=>t>0);
+      const med=tot30.length?tot30.reduce((s,t)=>s+t,0)/tot30.length:0;
+      if(med>0&&totalHoyPre<med*0.8)alertasMedia.push({nombre:rep.nombre,pct:Math.round((totalHoyPre-med)/med*100)});
+    }
+    if(alertasMedia.length){
+      html+='<div style="background:var(--red-light);border:1.5px solid var(--red);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:1rem">';
+      html+='<div style="font-size:13px;font-weight:700;color:var(--red);margin-bottom:6px">⚠️ Alertas de cobro inusualmente bajo</div>';
+      alertasMedia.forEach(a=>html+='<div style="font-size:13px;color:var(--red)">'+a.nombre+': '+a.pct+'% respecto a su media</div>');
+      html+='</div>';
+    }
     // resumen deudas
     html+='<div style="background:var(--accent-light);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:1rem">';
     html+='<div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Total pendiente de cobro</div>';
@@ -663,14 +690,38 @@ async function cargarPanelJefe(){
       const panesStr=PANES.filter(p=>panesDia[p.key]>0).map(p=>panesDia[p.key]+' '+p.key).join(', ')||'Sin datos';
       const estado=j&&j.cerrada?'✅ Cerrada':j?'🟡 En curso':'⚪ Sin empezar';
       const arq=j&&j.arqueo?j.arqueo:null;
-      html+='<div style="background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius-sm);margin-bottom:10px;overflow:hidden">';
-      html+='<div style="background:var(--bg);padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">';
-      html+='<span style="font-size:16px;font-weight:600">'+rep.nombre+'</span><span style="font-size:13px">'+estado+'</span></div>';
+
+      // calcular media de los últimos 30 días
+      const hace30=new Date();hace30.setDate(hace30.getDate()-30);
+      const desde30=hace30.toISOString().split('T')[0];
+      const jornadas30=await dbGet('jornadas','repartidor_id=eq.'+rep.id+'&fecha=gte.'+desde30+'&fecha=lt.'+hoy+'&cerrada=eq.true');
+      const totales30=jornadas30.map(jj=>{
+        const cc=jj.clientes_data||[];
+        return cc.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
+      }).filter(t=>t>0);
+      const media30=totales30.length?totales30.reduce((s,t)=>s+t,0)/totales30.length:0;
+      const pctDif=media30>0?((totalHoy-media30)/media30)*100:0;
+      const alertaMedia=j&&j.cerrada&&media30>0&&pctDif<-20; // alerta si cae más del 20%
+
+      html+='<div style="background:var(--card);border:1.5px solid '+(alertaMedia?'var(--red)':'var(--border)')+';border-radius:var(--radius-sm);margin-bottom:10px;overflow:hidden">';
+      html+='<div style="background:'+(alertaMedia?'var(--red-light)':'var(--bg)')+';padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">';
+      html+='<span style="font-size:16px;font-weight:600">'+rep.nombre+(alertaMedia?' ⚠️':'')+'</span><span style="font-size:13px">'+estado+'</span></div>';
       html+='<div style="padding:12px 14px;border-bottom:1px solid var(--border)">';
       html+='<div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Hoy</div>';
       html+='<div style="font-size:13px;color:var(--muted);margin-bottom:4px">'+panesStr+'</div>';
       if(cls.length){
         html+='<div style="font-size:15px;font-weight:700;color:var(--accent);margin-bottom:8px">'+fmt(totalHoy)+' € cobrado · '+cls.length+' clientes</div>';
+        // comparativa con media
+        if(media30>0&&j&&j.cerrada){
+          const difStr=pctDif>=0?'+'+pctDif.toFixed(0)+'%':pctDif.toFixed(0)+'%';
+          const difColor=pctDif>=-10?'var(--green)':pctDif>=-20?'var(--warn)':'var(--red)';
+          html+='<div style="background:var(--bg);border-radius:var(--radius-sm);padding:7px 10px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">';
+          html+='<span style="font-size:12px;color:var(--muted)">Media 30 días: <b>'+fmt(media30)+' €</b></span>';
+          html+='<span style="font-size:13px;font-weight:700;color:'+difColor+'">'+difStr+'</span></div>';
+          if(alertaMedia){
+            html+='<div style="background:var(--red-light);color:var(--red);border-radius:var(--radius-sm);padding:8px 10px;font-size:13px;font-weight:500;margin-bottom:8px">⚠️ Cobro un '+Math.abs(pctDif.toFixed(0))+'% inferior a la media — revisar</div>';
+          }
+        }
         html+='<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">';
         cls.forEach(c=>{
           html+='<span style="font-size:11px;background:var(--bg);color:var(--text);border-radius:99px;padding:2px 8px;border:1px solid var(--border)">'+c.nombre+(c.horaEntrega?' 🕐'+c.horaEntrega:'')+'</span>';
@@ -699,9 +750,21 @@ async function cargarPanelJefe(){
           const aqH=jh.arqueo;
           const difColor2=aqH&&aqH.diferencia!=null&&!isNaN(aqH.diferencia)?(aqH.diferencia===0?'var(--green)':aqH.diferencia>0?'var(--warn)':'var(--red)'):'var(--muted)';
           const difStr2=aqH&&aqH.diferencia!=null&&!isNaN(aqH.diferencia)?(aqH.diferencia===0?'✅':(aqH.diferencia>0?'⚠️ +':'❌ ')+fmt(Math.abs(aqH.diferencia))+' €'):'Sin arqueo';
-          html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">';
-          html+='<div><div style="font-weight:500">'+labelFecha(jh.fecha)+'</div><div style="font-size:11px;color:var(--muted)">'+panesTot+'</div></div>';
-          html+='<div style="text-align:right"><div style="font-weight:600;color:var(--accent)">'+fmt(totH)+' €</div><div style="font-size:11px;color:'+difColor2+'">'+difStr2+'</div></div>';
+          const diaId='jefe-dia-'+jh.id;
+          // detalle clientes
+          const clientesDetalle=clsH.map(c=>{
+            const pc=PANES.filter(p=>c.qtys[p.key]>0).map(p=>c.qtys[p.key]+' '+p.key).join(', ');
+            const hora=c.horaEntrega?' 🕐'+c.horaEntrega:'';
+            return '<div style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0;border-bottom:1px solid var(--border)">'
+              +'<span>'+c.nombre+hora+' <span style="color:var(--muted)">'+pc+'</span></span>'
+              +'<span style="font-weight:600">'+fmt(totalCliente(c))+' €</span></div>';
+          }).join('');
+          html+='<div style="padding:6px 0;border-bottom:1px solid var(--border)">';
+          html+='<div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="const d=document.getElementById(\''+diaId+'\');d.style.display=d.style.display===\'none\'?\'block\':\'none\'">';
+          html+='<div><div style="font-weight:500;font-size:13px">'+labelFecha(jh.fecha)+'<span style="font-size:11px;color:var(--muted);margin-left:4px">('+clsH.length+' clientes)</span></div>';
+          html+='<div style="font-size:11px;color:var(--muted)">'+panesTot+'</div></div>';
+          html+='<div style="text-align:right"><div style="font-weight:600;color:var(--accent);font-size:13px">'+fmt(totH)+' €</div><div style="font-size:11px;color:'+difColor2+'">'+difStr2+'</div></div></div>';
+          html+='<div id="'+diaId+'" style="display:none;background:var(--bg);border-radius:var(--radius-sm);padding:6px 8px;margin-top:4px">'+clientesDetalle+'</div>';
           html+='</div>';
         });
         html+='</div>';
@@ -844,7 +907,7 @@ function renderReparto(){
     const panesHtml=PANES.map(p=>{
       const precio=precioCliente(c,p.key);const normal=PANES.find(x=>x.key===p.key).precio;
       const esDif=esEspecial&&precio!==normal;const activo=c.qtys[p.key]>0;
-      return `<div class="pan-row"><div class="pan-info"><div class="pan-nombre">${p.nombre}</div><div class="pan-precio${esDif?' especial':''}">${fmt(precio)} €${esDif?' ★':''}</div></div><div class="qty-ctrl"><button class="qb${activo?' on':''}" data-id="${c.id}" data-key="${p.key}" data-action="dec">−</button><span class="qn" data-key="${p.key}">${c.qtys[p.key]}</span><button class="qb${activo?' on':''}" data-id="${c.id}" data-key="${p.key}" data-action="inc">+</button></div></div>`;
+      return `<div class="pan-row"><div class="pan-info"><div class="pan-nombre">${p.nombre}</div><div class="pan-precio${esDif?' especial':''}">${fmt(precio)} €${esDif?' ★':''}</div></div><div class="qty-ctrl"><button class="qb${activo?' on':''}" data-id="${c.id}" data-key="${p.key}" data-action="dec">−</button><input type="number" min="0" step="1" value="${c.qtys[p.key]}" class="qty-input" data-id="${c.id}" data-key="${p.key}" style="width:42px;height:28px;text-align:center;font-size:14px;font-weight:600;padding:0 4px;border-radius:var(--radius-sm);border:1.5px solid var(--border)"/><button class="qb${activo?' on':''}" data-id="${c.id}" data-key="${p.key}" data-action="inc">+</button></div></div>`;
     }).join('');
     const extras=c.extras||[];
     const extrasHtml=extras.map((ex,i)=>`<div class="extra-item"><input class="extra-nota" type="text" placeholder="Ej: Empanada de atún" value="${ex.desc||''}" data-id="${c.id}" data-ei="${i}" data-field="desc"/><input class="extra-precio" type="number" step="0.01" min="0" placeholder="€" value="${ex.precio||''}" data-id="${c.id}" data-ei="${i}" data-field="precio"/><button class="extra-del" data-id="${c.id}" data-ei="${i}" data-action="del-extra">×</button></div>`).join('');
@@ -1053,13 +1116,35 @@ document.getElementById('lista-clientes').addEventListener('click',async e=>{
 });
 
 document.getElementById('lista-clientes').addEventListener('input',async e=>{
-  const el=e.target;if(!el.dataset.id||!el.dataset.field)return;
+  const inp=e.target;
+  // cantidad directa
+  if(inp.classList&&inp.classList.contains('qty-input')){
+    const id=inp.dataset.id;const key=inp.dataset.key;
+    const c=jornada.find(x=>x.id===id);if(!c)return;
+    const val=Math.max(0,parseInt(inp.value)||0);
+    c.qtys[key]=val;
+    if(val>0&&!c.horaEntrega&&PANES.reduce((s,p)=>s+c.qtys[p.key],0)===val){
+      const ahora=new Date();
+      c.horaEntrega=String(ahora.getHours()).padStart(2,'0')+':'+String(ahora.getMinutes()).padStart(2,'0');
+    }
+    if(val===0&&PANES.reduce((s,p)=>s+c.qtys[p.key],0)===0)c.horaEntrega=null;
+    const card=inp.closest('.card');
+    if(card){
+      card.querySelectorAll('.qb[data-key="'+key+'"]').forEach(b=>{if(val>0)b.classList.add('on');else b.classList.remove('on');});
+      const amEl=card.querySelector('.card-amount');if(amEl)amEl.textContent=fmt(totalCliente(c))+' €';
+      const chipsWrap=card.querySelector('.card-header div div:last-child');
+      if(chipsWrap){const rp=PANES.filter(p=>c.qtys[p.key]>0).map(p=>'<span style="background:var(--bg);border:1px solid var(--border);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;color:var(--text)">'+c.qtys[p.key]+' '+p.key+'</span>').join('');chipsWrap.innerHTML=rp;}
+    }
+    actualizarResumenGlobal();
+    clearTimeout(inp._t);inp._t=setTimeout(async()=>{await guardarJornadaDB();},1000);
+    return;
+  }
+  // extras
+  const el=inp;if(!el.dataset.id||!el.dataset.field)return;
   const c=jornada.find(x=>x.id===el.dataset.id);if(!c||!c.extras)return;
   c.extras[parseInt(el.dataset.ei)][el.dataset.field]=el.value;
-  // actualizar solo el importe en cabecera sin re-renderizar toda la tarjeta
   const card=el.closest('.card');
   if(card){const am=card.querySelector('.card-amount');if(am)am.textContent=fmt(totalCliente(c))+' €';}
-  // guardar en DB con debounce largo, sin re-renderizar
   clearTimeout(el._t);el._t=setTimeout(async()=>{await guardarJornadaDB();},1500);
 });
 
@@ -1446,7 +1531,32 @@ async function renderHistorial(){
       const panesStr=PANES.filter(p=>pd[p.key]>0).map(p=>`<span class="pan-chip">${p.key}:${pd[p.key]}</span>`).join('');
       const dd=j.devols_dia||{};
       const devolStr=PANES.filter(p=>dd[p.key]>0).map(p=>`<span class="pan-chip" style="background:var(--green-light);color:var(--green);border-color:var(--green)">↩${p.key}:${dd[p.key]}</span>`).join('');
-      return `<div class="hist-dia"><div><div class="hist-dia-fecha">${labelFecha(j.fecha)}</div><div class="hist-dia-panes">${panesStr}${devolStr}</div></div><span class="hist-dia-total">${fmt(tot)} €</span></div>`;
+      // detalle por cliente
+      const clientesHtml=cls.map(c=>{
+        const panesCli=PANES.filter(p=>c.qtys[p.key]>0).map(p=>c.qtys[p.key]+' '+p.key).join(', ');
+        const extrasCli=(c.extras||[]).filter(ex=>ex.desc||ex.precio).map(ex=>(ex.desc||'Extra')+' '+fmt(ex.precio||0)+'€').join(', ');
+        const totalCli=totalCliente(c);
+        const hora=c.horaEntrega?'<span style="color:var(--muted)"> 🕐'+c.horaEntrega+'</span>':'';
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px">
+          <div>
+            <span style="font-weight:500">${c.nombre}</span>${hora}
+            <div style="color:var(--muted);font-size:11px">${[panesCli,extrasCli].filter(Boolean).join(' + ')}${!c.pagaHoy?' 📋':''}${c.devols&&PANES.some(p=>c.devols[p.key]>0)?' ↩'+PANES.filter(p=>c.devols[p.key]>0).map(p=>c.devols[p.key]+p.key).join(','):''}
+            </div>
+          </div>
+          <span style="font-weight:600;margin-left:8px">${fmt(totalCli)} €</span>
+        </div>`;
+      }).join('');
+      const diaId='dia-det-'+j.id;
+      return `<div class="hist-dia" style="flex-direction:column;align-items:stretch;gap:0">
+        <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;padding:2px 0" onclick="const d=document.getElementById('${diaId}');d.style.display=d.style.display==='none'?'block':'none'">
+          <div>
+            <div class="hist-dia-fecha">${labelFecha(j.fecha)} <span style="font-size:11px;color:var(--muted)">(${cls.length} clientes)</span></div>
+            <div class="hist-dia-panes">${panesStr}${devolStr}</div>
+          </div>
+          <span class="hist-dia-total">${fmt(tot)} €</span>
+        </div>
+        <div id="${diaId}" style="display:none;margin-top:6px;padding:6px 8px;background:var(--bg);border-radius:var(--radius-sm)">${clientesHtml}</div>
+      </div>`;
     }).join('');
     const mesDiv=document.createElement('div');mesDiv.className='hist-mes';
     const mesHeader=document.createElement('div');mesHeader.className='hist-mes-header';
@@ -1472,7 +1582,12 @@ function renderStockPanel(){
 
   PANES.forEach(p=>{
     const sal=stockSalida[p.key]||0;
-    const repartido=jornada.reduce((s,c)=>s+(c.qtys[p.key]||0),0);
+    // solo contar clientes que NO están excluidos del stock
+    const repartido=jornada.filter(c=>{
+      if(!c.clienteId)return true;
+      const cg=clientesGuardados.find(x=>x.id===c.clienteId);
+      return !cg||cg.excluir_stock!=='si';
+    }).reduce((s,c)=>s+(c.qtys[p.key]||0),0);
     const devuelto=jornada.reduce((s,c)=>s+((c.devols&&c.devols[p.key])||0),0);
     const queda=Math.max(0,sal-repartido+devuelto);
     const alerta=sal>0&&queda<0;
@@ -1637,10 +1752,11 @@ async function cargarConsumoMes(mes){
 }
 
 // CLIENTES GUARDADOS
-async function renderClientesGuardados(){
+async function renderClientesGuardados(filtro=''){
   const cont=document.getElementById('lista-clientes-guardados');cont.innerHTML='';
-  if(!clientesGuardados.length){cont.innerHTML='<div class="empty"><div class="empty-icon">👥</div>Aún no hay clientes guardados</div>';return;}
-  clientesGuardados.forEach(cg=>{
+  const lista=filtro?clientesGuardados.filter(cg=>cg.nombre.toLowerCase().includes(filtro)):clientesGuardados;
+  if(!lista.length){cont.innerHTML='<div class="empty"><div class="empty-icon">👥</div>'+(filtro?'Sin resultados':'Aún no hay clientes guardados')+'</div>';return;}
+  lista.forEach(cg=>{
     const div=document.createElement('div');div.className='client-item';
     const tags=[];
     if(cg.fijo==='si'){
@@ -1666,6 +1782,7 @@ function abrirModalCG(cg){
   document.getElementById('mcg-pago').value=cg?cg.pago||'diario':'diario';
   document.getElementById('mcg-fijo').value=cg?cg.fijo||'no':'no';
   document.getElementById('mcg-devol').value=cg?cg.devol||'no':'no';
+  document.getElementById('mcg-stock').value=cg?cg.excluir_stock||'no':'no';
 
   // días de reparto
   const DIAS_SEMANA=['L','M','X','J','V','S','D'];
@@ -1714,14 +1831,15 @@ async function guardarCG(){
   const pago=document.getElementById('mcg-pago').value;
   const fijo=document.getElementById('mcg-fijo').value;
   const devol=document.getElementById('mcg-devol').value;
+  const excluir_stock=document.getElementById('mcg-stock').value;
   const DIAS_KEYS=['lun','mar','mie','jue','vie','sab','dom'];
   const dias_reparto=fijo==='si'
     ?Array.from(document.getElementById('mcg-dias-grid').querySelectorAll('button')).filter(b=>b.style.background==='var(--accent)'||b.style.background.includes('accent')).map(b=>b.dataset.dia)
     :['lun','mar','mie','jue','vie','sab','dom'];
   const precios={};PANES.forEach(p=>{const v=document.getElementById('mcg-p-'+p.key).value;precios[p.key]=v!==''?parseFloat(v):null;});
   try{
-    if(editCGId)await dbUpdate('clientes',editCGId,{nombre,pago,fijo,devol,dias_reparto,precios});
-    else await dbInsert('clientes',{nombre,pago,fijo,devol,dias_reparto,precios});
+    if(editCGId)await dbUpdate('clientes',editCGId,{nombre,pago,fijo,devol,excluir_stock,dias_reparto,precios});
+    else await dbInsert('clientes',{nombre,pago,fijo,devol,excluir_stock,dias_reparto,precios});
     clientesGuardados=await dbGet('clientes','order=nombre.asc');
     cerrarModal('modal-cg');renderClientesGuardados();
   }catch(e){errEl.textContent='Error: '+e.message;errEl.style.display='block';}
@@ -1736,9 +1854,72 @@ async function eliminarCG(){
 document.getElementById('btn-logout').addEventListener('click',()=>{repActual=null;jornada=[];showScreen('s-login');renderLogin();});
 renderLogin();
 
-// SERVICE WORKER para PWA
+// BÚSQUEDA DE CLIENTES en tiempo real
+document.getElementById('inp-cliente').addEventListener('input',function(){
+  const q=this.value.trim().toLowerCase();
+  const dropdown=document.getElementById('busqueda-dropdown');
+  if(!q){dropdown.style.display='none';return;}
+  const coincidencias=clientesGuardados.filter(cg=>cg.nombre.toLowerCase().includes(q)&&!jornada.some(j=>j.clienteId===cg.id));
+  if(!coincidencias.length){dropdown.style.display='none';return;}
+  dropdown.style.display='block';
+  dropdown.innerHTML='';
+  coincidencias.slice(0,6).forEach(cg=>{
+    const item=document.createElement('div');
+    item.style.cssText='padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);font-size:14px;display:flex;justify-content:space-between;align-items:center';
+    const tags=[];
+    if(cg.fijo==='si')tags.push('⭐');
+    if(cg.pago==='mensual')tags.push('📋');
+    if(cg.precios&&Object.values(cg.precios).some(v=>v!=null))tags.push('★');
+    item.innerHTML='<span>'+cg.nombre+'</span><span style="font-size:12px;color:var(--muted)">'+tags.join(' ')+'</span>';
+    item.addEventListener('mousedown',async e=>{
+      e.preventDefault();
+      dropdown.style.display='none';
+      document.getElementById('inp-cliente').value='';
+      const nuevo={id:String(Date.now()),clienteId:cg.id,nombre:cg.nombre,qtys:{},extras:[],devols:{},pagaHoy:cg.pago!=='mensual'};
+      PANES.forEach(p=>nuevo.qtys[p.key]=0);
+      jornada.push(nuevo);
+      await guardarJornadaDB();renderFijos();renderReparto();
+    });
+    item.addEventListener('mouseover',()=>item.style.background='var(--bg)');
+    item.addEventListener('mouseout',()=>item.style.background='');
+    dropdown.appendChild(item);
+  });
+});
+
+document.getElementById('inp-cliente').addEventListener('blur',()=>{
+  setTimeout(()=>document.getElementById('busqueda-dropdown').style.display='none',200);
+});
+
+// BÚSQUEDA en pestaña Clientes
+document.getElementById('inp-buscar-cliente').addEventListener('input',function(){
+  const q=this.value.trim().toLowerCase();
+  renderClientesGuardados(q);
+});
+
+// MODO OFFLINE con Service Worker
 if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('/sw.js').catch(()=>{});
+  const swCode=`
+    const CACHE='panaderia-v2';
+    self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/']))));
+    self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k))))));
+    self.addEventListener('fetch',e=>{
+      if(e.request.url.includes('supabase.co')||e.request.url.includes('fonts.google')){
+        e.respondWith(fetch(e.request).catch(()=>new Response('',{status:503})));
+        return;
+      }
+      e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{
+        const clone=res.clone();
+        caches.open(CACHE).then(c=>c.put(e.request,clone));
+        return res;
+      })));
+    });
+  `;
+  const blob=new Blob([swCode],{type:'application/javascript'});
+  navigator.serviceWorker.register(URL.createObjectURL(blob));
+
+  // banner offline/online
+  window.addEventListener('online',()=>mostrarToast('✅ Conexión restaurada — sincronizando...'));
+  window.addEventListener('offline',()=>mostrarToast('⚠️ Sin conexión — los datos se guardarán al reconectar'));
 }
 
 // BANNER DE INSTALACIÓN
