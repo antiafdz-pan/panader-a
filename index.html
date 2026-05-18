@@ -165,6 +165,20 @@ details summary::-webkit-details-marker{display:none}
 </head>
 <body>
 
+<!-- MODAL: producto -->
+<div class="modal-bg" id="modal-producto">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <h3 id="mprod-titulo">Nuevo producto</h3>
+    <div class="field"><label>Abreviatura (ej: G, PA)</label><input id="mprod-key" placeholder="Ej: CR" maxlength="4"/></div>
+    <div class="field"><label>Nombre completo</label><input id="mprod-nombre" placeholder="Ej: Croissant"/></div>
+    <div class="field"><label>Precio (€)</label><input type="number" id="mprod-precio" placeholder="0,00" min="0" step="0.01"/></div>
+    <div class="field"><label>Orden (número para ordenar)</label><input type="number" id="mprod-orden" placeholder="7" min="1" step="1"/></div>
+    <div class="err" id="mprod-err"></div>
+    <div class="modal-btns" id="mprod-btns"></div>
+  </div>
+</div>
+
 <!-- MODAL: confirmación -->
 <div class="modal-bg" id="modal-confirm">
   <div class="modal" style="max-width:340px">
@@ -244,6 +258,10 @@ details summary::-webkit-details-marker{display:none}
         <div class="sum-row"><span>AP – Art. pequeño</span><span class="sum-val" id="r-AP">0</span></div>
         <div class="sum-row"><span>AG – Art. grande</span><span class="sum-val" id="r-AG">0</span></div>
         <div class="sum-row"><span>Pallarina</span><span class="sum-val" id="r-PA">0</span></div>
+        <div id="r-extras-wrap" style="display:none;border-top:1px solid var(--border);margin-top:6px;padding-top:6px">
+          <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Extras</div>
+          <div id="r-extras-lista"></div>
+        </div>
         <div class="sum-total"><span class="sum-total-label">Cobrado hoy</span><span class="sum-total-val" id="r-total">0,00 €</span></div>
         <div style="border-top:1.5px solid var(--border);margin-top:10px;padding-top:10px">
           <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Gastos y pagos del repartidor</div>
@@ -392,7 +410,15 @@ details summary::-webkit-details-marker{display:none}
   <div class="modal">
     <div class="modal-handle"></div>
     <h3>👁 Panel del jefe</h3>
-    <div id="jefe-contenido"><div class="loading">Cargando...</div></div>
+    <div style="display:flex;gap:4px;margin-bottom:1rem;background:var(--border);padding:3px;border-radius:var(--radius-sm)">
+      <button class="tab active" id="jefe-tab-rep" onclick="switchJefeTab('rep')">Repartos</button>
+      <button class="tab" id="jefe-tab-prod" onclick="switchJefeTab('prod')">Productos</button>
+    </div>
+    <div id="jefe-panel-rep"><div id="jefe-contenido"><div class="loading">Cargando...</div></div></div>
+    <div id="jefe-panel-prod" style="display:none">
+      <div id="jefe-productos-contenido"></div>
+      <button class="btn btn-sm btn-primary" id="btn-nuevo-producto" style="width:100%;margin-top:1rem">+ Nuevo producto</button>
+    </div>
     <div class="modal-btns" style="margin-top:1rem">
       <button class="btn btn-full" id="btn-exportar-excel" style="background:var(--green-light);color:var(--green);border-color:var(--green)">📊 Exportar a Excel</button>
       <button class="btn btn-full" id="jefe-cancel">Cerrar</button>
@@ -481,7 +507,8 @@ details summary::-webkit-details-marker{display:none}
 <script>
 const SURL='https://sbrijvdblittkmeptetd.supabase.co';
 const SKEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNicmlqdmRibGl0dGttZXB0ZXRkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg1ODcyNDQsImV4cCI6MjA5NDE2MzI0NH0.BHpdsES586PmdUefLo0LE9tLqsLoLU9aNHYncf6WYNc';
-const PANES=[
+// PANES se carga desde Supabase al iniciar
+let PANES=[
   {key:'G', nombre:'G – Barra grande', precio:1.60},
   {key:'P', nombre:'P – Barra pequeña',precio:1.10},
   {key:'B', nombre:'B – Bollito',       precio:0.60},
@@ -489,6 +516,14 @@ const PANES=[
   {key:'AG',nombre:'AG – Art. grande', precio:2.70},
   {key:'PA',nombre:'Pallarina',         precio:1.10},
 ];
+async function cargarProductos(){
+  try{
+    const prods=await dbGet('productos','activo=eq.true&order=orden.asc');
+    if(prods&&prods.length){
+      PANES=prods.map(p=>({key:p.key,nombre:p.nombre,precio:parseFloat(p.precio),id:p.id}));
+    }
+  }catch(e){console.warn('No se pudieron cargar productos desde Supabase, usando valores por defecto');}
+}
 const MESES=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 let repActual=null,clientesGuardados=[],jornada=[];
 
@@ -650,6 +685,82 @@ document.getElementById('cambio-cliente').addEventListener('change',calcularCamb
 document.getElementById('cambio-paga').addEventListener('input',calcularCambio);
 
 // PANEL JEFE
+// PANEL JEFE TABS
+function switchJefeTab(tab){
+  ['rep','prod'].forEach(t=>{
+    document.getElementById('jefe-panel-'+t).style.display=t===tab?'block':'none';
+    document.getElementById('jefe-tab-'+t).classList.toggle('active',t===tab);
+  });
+  if(tab==='prod')renderProductosJefe();
+}
+
+async function renderProductosJefe(){
+  const cont=document.getElementById('jefe-productos-contenido');
+  cont.innerHTML='<div class="loading">Cargando...</div>';
+  try{
+    const prods=await dbGet('productos','order=orden.asc');
+    cont.innerHTML='';
+    prods.forEach(p=>{
+      const div=document.createElement('div');
+      div.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;gap:8px';
+      div.innerHTML='<div style="flex:1"><div style="font-size:15px;font-weight:600">'+p.nombre+'</div>'
+        +'<div style="font-size:12px;color:var(--muted)">'+p.key+' · '+fmt(p.precio)+' € · Orden: '+p.orden+'</div></div>'
+        +'<span style="font-size:11px;padding:3px 8px;border-radius:99px;background:'+(p.activo?'var(--green-light)':'var(--red-light)')+';color:'+(p.activo?'var(--green)':'var(--red)')+';">'+(p.activo?'Activo':'Inactivo')+'</span>'
+        +'<button style="background:none;border:none;font-size:13px;color:var(--muted);cursor:pointer" data-pid="'+p.id+'">Editar →</button>';
+      div.querySelector('[data-pid]').addEventListener('click',()=>abrirModalProducto(p));
+      cont.appendChild(div);
+    });
+  }catch(e){cont.innerHTML='<div class="error-banner">Error: '+e.message+'</div>';}
+}
+
+let editProdId=null;
+function abrirModalProducto(p){
+  editProdId=p?p.id:null;
+  document.getElementById('mprod-titulo').textContent=p?'Editar producto':'Nuevo producto';
+  document.getElementById('mprod-key').value=p?p.key:'';
+  document.getElementById('mprod-nombre').value=p?p.nombre:'';
+  document.getElementById('mprod-precio').value=p?p.precio:'';
+  document.getElementById('mprod-orden').value=p?p.orden:'';
+  document.getElementById('mprod-err').style.display='none';
+  const btns=document.getElementById('mprod-btns');btns.innerHTML='';
+  if(p){
+    const toggleBtn=document.createElement('button');
+    toggleBtn.className='btn';
+    toggleBtn.style.color=p.activo?'var(--red)':'var(--green)';
+    toggleBtn.textContent=p.activo?'Desactivar':'Activar';
+    toggleBtn.addEventListener('click',async()=>{
+      await dbUpdate('productos',p.id,{activo:!p.activo});
+      await cargarProductos();
+      cerrarModal('modal-producto');
+      renderProductosJefe();
+      mostrarToast(p.activo?'Producto desactivado':'Producto activado');
+    });
+    btns.appendChild(toggleBtn);
+  }
+  const cancelBtn=document.createElement('button');cancelBtn.className='btn btn-full';cancelBtn.textContent='Cancelar';cancelBtn.addEventListener('click',()=>cerrarModal('modal-producto'));btns.appendChild(cancelBtn);
+  const okBtn=document.createElement('button');okBtn.className='btn btn-full btn-primary';okBtn.textContent='Guardar';okBtn.addEventListener('click',guardarProducto);btns.appendChild(okBtn);
+  abrirModal('modal-producto');
+}
+
+async function guardarProducto(){
+  const key=document.getElementById('mprod-key').value.trim().toUpperCase();
+  const nombre=document.getElementById('mprod-nombre').value.trim();
+  const precio=parseFloat(document.getElementById('mprod-precio').value);
+  const orden=parseInt(document.getElementById('mprod-orden').value)||99;
+  const errEl=document.getElementById('mprod-err');
+  if(!key||!nombre||isNaN(precio)){errEl.textContent='Rellena todos los campos';errEl.style.display='block';return;}
+  try{
+    if(editProdId){await dbUpdate('productos',editProdId,{key,nombre,precio,orden});}
+    else{await dbInsert('productos',{key,nombre,precio,orden,activo:true});}
+    await cargarProductos();
+    cerrarModal('modal-producto');
+    renderProductosJefe();
+    mostrarToast('✓ Producto guardado');
+  }catch(e){errEl.textContent='Error: '+e.message;errEl.style.display='block';}
+}
+
+document.getElementById('btn-nuevo-producto').addEventListener('click',()=>abrirModalProducto(null));
+
 document.getElementById('btn-panel-jefe').addEventListener('click',()=>{
   document.getElementById('inp-pass-jefe').value='';
   document.getElementById('pass-jefe-err').style.display='none';
@@ -668,6 +779,7 @@ document.getElementById('pass-jefe-ok').addEventListener('click',async()=>{
     if(pass!==passCorrecta){err.textContent='Contraseña incorrecta';err.style.display='block';return;}
     cerrarModal('modal-pass-jefe');
     abrirModal('modal-jefe');
+    switchJefeTab('rep');
     cargarPanelJefe();
   }catch(e){err.textContent='Error al verificar';err.style.display='block';}
 });
@@ -1392,10 +1504,20 @@ document.getElementById('lista-clientes').addEventListener('input',async e=>{
 
 function actualizarResumenGlobal(){
   document.getElementById('resumen').style.display=jornada.length?'block':'none';
-  document.getElementById('badge-clientes').textContent=jornada.length;
+  const pendientesBadge=jornada.filter(c=>!c.entregado).length;
+  document.getElementById('badge-clientes').textContent=pendientesBadge>0?pendientesBadge+'/'+jornada.length:jornada.length+' ✓';
   document.getElementById('r-nc').textContent=jornada.length;
   PANES.forEach(p=>{const el=document.getElementById('r-'+p.key);if(el)el.textContent=jornada.reduce((s,c)=>s+c.qtys[p.key],0);});
   PANES.forEach(p=>{const el=document.getElementById('d-'+p.key);if(el)el.textContent=jornada.reduce((s,c)=>s+((c.devols&&c.devols[p.key])||0),0);});
+  // extras
+  const todosExtras=[];
+  jornada.forEach(c=>(c.extras||[]).filter(ex=>ex.desc||ex.precio).forEach(ex=>todosExtras.push({cliente:c.nombre,desc:ex.desc||'Extra',precio:parseFloat(ex.precio)||0})));
+  const extrasWrap=document.getElementById('r-extras-wrap');
+  const extrasLista=document.getElementById('r-extras-lista');
+  if(todosExtras.length&&extrasWrap&&extrasLista){
+    extrasWrap.style.display='block';
+    extrasLista.innerHTML=todosExtras.map(ex=>'<div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span style="color:var(--muted)">'+ex.cliente+' — '+ex.desc+'</span><span style="font-weight:600">'+fmt(ex.precio)+' €</span></div>').join('');
+  } else if(extrasWrap){extrasWrap.style.display='none';}
   const tot=jornada.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
   document.getElementById('r-total').textContent=fmt(tot)+' €';
 }
@@ -2186,7 +2308,8 @@ async function eliminarCG(){
 }
 
 document.getElementById('btn-logout').addEventListener('click',()=>{repActual=null;jornada=[];showScreen('s-login');renderLogin();});
-renderLogin();
+// cargar productos y luego mostrar login
+cargarProductos().then(()=>renderLogin());
 
 // BÚSQUEDA DE CLIENTES en tiempo real
 document.getElementById('inp-cliente').addEventListener('input',function(){
