@@ -581,17 +581,17 @@ document.getElementById('btn-whatsapp').addEventListener('click',()=>{
   let msg='🍞 *Reparto '+repActual.nombre+' — '+fecha+'*\n\n';
   jornada.forEach(c=>{
     const total=totalCliente(c);
-    const panes=PANES.filter(p=>c.qtys[p.key]>0).map(p=>c.qtys[p.key]+' '+p.key).join(', ');
+    const panes=PANES.filter(p=>c.qtys[p.key]>0).map(p=>c.qtys[p.key]+' '+p.nombre).join(', ');
     const extras=(c.extras||[]).filter(ex=>ex.desc||ex.precio).map(ex=>(ex.desc||'Extra')+' '+fmt(ex.precio||0)+' €').join(', ');
-    const devols=PANES.filter(p=>(c.devols&&c.devols[p.key]>0)).map(p=>'↩'+c.devols[p.key]+' '+p.key).join(', ');
+    const devols=PANES.filter(p=>(c.devols&&c.devols[p.key]>0)).map(p=>'↩'+c.devols[p.key]+' '+p.nombre).join(', ');
     msg+='• *'+c.nombre+'*: '+[panes,extras].filter(Boolean).join(' + ')+(devols?' (dev: '+devols+')':'')+' = '+fmt(total)+' €'+(c.pagaHoy?'':' 📋 cuenta')+'\n';
   });
   const totPanes={};PANES.forEach(p=>totPanes[p.key]=0);
   jornada.forEach(c=>PANES.forEach(p=>totPanes[p.key]+=c.qtys[p.key]));
   const totDevols={};PANES.forEach(p=>totDevols[p.key]=0);
   jornada.forEach(c=>PANES.forEach(p=>totDevols[p.key]+=(c.devols&&c.devols[p.key])||0));
-  msg+='\n📦 *Total panes:* '+PANES.filter(p=>totPanes[p.key]>0).map(p=>totPanes[p.key]+' '+p.key).join(', ');
-  const totDevolStr=PANES.filter(p=>totDevols[p.key]>0).map(p=>totDevols[p.key]+' '+p.key).join(', ');
+  msg+='\n📦 *Total panes:* '+PANES.filter(p=>totPanes[p.key]>0).map(p=>totPanes[p.key]+' '+p.nombre).join(', ');
+  const totDevolStr=PANES.filter(p=>totDevols[p.key]>0).map(p=>totDevols[p.key]+' '+p.nombre).join(', ');
   if(totDevolStr)msg+='\n↩ *Devoluciones:* '+totDevolStr;
   const totalCobrado=jornada.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
   const totalCuenta=jornada.filter(c=>!c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
@@ -806,73 +806,125 @@ document.getElementById('btn-exportar-excel').addEventListener('click',async()=>
     const hoy=new Date();
     const mes=String(hoy.getMonth()+1).padStart(2,'0');
     const anyo=hoy.getFullYear();
-    const desde=`${anyo}-${mes}-01`;
+    const desde=anyo+'-'+mes+'-01';
     const dFin=new Date(anyo,hoy.getMonth()+1,0);
-    const hasta=`${anyo}-${mes}-${String(dFin.getDate()).padStart(2,'0')}`;
+    const hasta=anyo+'-'+mes+'-'+String(dFin.getDate()).padStart(2,'0');
+    const diasMes=dFin.getDate();
+    const nombreMes=MESES[hoy.getMonth()]+' '+anyo;
 
     const reps=await dbGet('repartidores','order=nombre.asc');
-    const cuentas=await dbGet('cuentas','order=cliente_nombre.asc');
-    const pagos=await dbGet('pagos',`fecha=gte.${desde}&fecha=lte.${hasta}&order=fecha.asc`);
+    const cuentas=await dbGet('cuentas','total=gt.0&order=cliente_nombre.asc');
+    const pagos=await dbGet('pagos','fecha=gte.'+desde+'&fecha=lte.'+hasta+'&order=fecha.asc');
 
-    // construir CSV con múltiples secciones
-    let csv='PANADERÍA PALLARES — Exportación '+MESES[hoy.getMonth()]+' '+anyo+'\n\n';
-
-    // SECCIÓN 1: Repartos del mes por repartidor
-    csv+='REPARTOS DEL MES\n';
-    csv+='Repartidor,Fecha,Clientes,'+PANES.map(p=>p.nombre).join(',')+',Total cobrado,Total cuenta\n';
+    // cargar SheetJS
+    await new Promise((res,rej)=>{
+      if(window.XLSX){res();return;}
+      const s=document.createElement('script');
+      s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.min.js';
+      s.onload=res;s.onerror=rej;
+      document.head.appendChild(s);
+    });
+    const XL=window.XLSX;
+    const wb=XL.utils.book_new();
+    const dias=Array.from({length:diasMes},(_,i)=>i+1);
 
     for(const rep of reps){
-      const jornadas=await dbGet('jornadas',`repartidor_id=eq.${rep.id}&fecha=gte.${desde}&fecha=lte.${hasta}&cerrada=eq.true&order=fecha.asc`);
-      for(const j of jornadas){
-        const cls=j.clientes_data||[];
-        const totCobrado=cls.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
-        const totCuenta=cls.filter(c=>!c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
-        const panesDia=PANES.map(p=>cls.reduce((s,c)=>s+(c.qtys[p.key]||0),0));
-        csv+=`${rep.nombre},${j.fecha},${cls.length},${panesDia.join(',')},${totCobrado.toFixed(2)},${totCuenta.toFixed(2)}\n`;
-      }
-    }
+      const jornadas=await dbGet('jornadas','repartidor_id=eq.'+rep.id+'&fecha=gte.'+desde+'&fecha=lte.'+hasta+'&cerrada=eq.true&order=fecha.asc');
+      const clientesSet=new Set();
+      jornadas.forEach(j=>(j.clientes_data||[]).forEach(c=>clientesSet.add(c.nombre)));
+      const clientes=[...clientesSet].sort();
 
-    // SECCIÓN 2: Detalle por cliente y día
-    csv+='\nDETALLE POR CLIENTE\n';
-    csv+='Repartidor,Fecha,Cliente,Hora,'+PANES.map(p=>p.key).join(',')+',Extras,Total,Pago\n';
-    for(const rep of reps){
-      const jornadas=await dbGet('jornadas',`repartidor_id=eq.${rep.id}&fecha=gte.${desde}&fecha=lte.${hasta}&cerrada=eq.true&order=fecha.asc`);
-      for(const j of jornadas){
-        const cls=j.clientes_data||[];
-        for(const c of cls){
-          const panes=PANES.map(p=>c.qtys[p.key]||0);
-          const extras=(c.extras||[]).filter(ex=>ex.desc).map(ex=>ex.desc+':'+ex.precio).join(' | ');
-          csv+=`${rep.nombre},${j.fecha},"${c.nombre}",${c.horaEntrega||''},${panes.join(',')},${extras?'"'+extras+'"':''},${totalCliente(c).toFixed(2)},${c.pagaHoy?'Cobrado':'Cuenta'}\n`;
+      const rows=[];
+      // título
+      rows.push(['PANADERÍA PALLARES — '+rep.nombre+' — '+nombreMes]);
+      rows.push([]);
+
+      // TABLA 1: importe por cliente y día
+      rows.push(['IMPORTES POR CLIENTE Y DÍA (€)']);
+      const h1=['Cliente',...dias,'TOTAL'];
+      rows.push(h1);
+      const totDia=new Array(diasMes).fill(0);
+      let totGen=0;
+      clientes.forEach(nombre=>{
+        const fila=[nombre];
+        let totC=0;
+        dias.forEach(d=>{
+          const fechaStr=anyo+'-'+mes+'-'+String(d).padStart(2,'0');
+          const j=jornadas.find(jj=>jj.fecha===fechaStr);
+          const c=j&&(j.clientes_data||[]).find(cc=>cc.nombre===nombre);
+          const val=c?parseFloat(totalCliente(c).toFixed(2)):null;
+          fila.push(val||null);
+          if(val){totC+=val;totDia[d-1]+=val;}
+        });
+        fila.push(parseFloat(totC.toFixed(2)));
+        totGen+=totC;
+        rows.push(fila);
+      });
+      rows.push(['TOTAL DÍA',...totDia.map(t=>t>0?parseFloat(t.toFixed(2)):null),parseFloat(totGen.toFixed(2))]);
+      rows.push([]);
+
+      // TABLA 2: detalle de entregas
+      rows.push(['DETALLE DE ENTREGAS']);
+      rows.push(['Fecha','Cliente','Hora',...PANES.map(p=>p.nombre),'Extras','Total €','Pago']);
+      jornadas.forEach(j=>{
+        (j.clientes_data||[]).forEach(c=>{
+          const panes=PANES.map(p=>c.qtys[p.key]||null);
+          const extras=(c.extras||[]).filter(ex=>ex.desc).map(ex=>ex.desc+': '+fmt(ex.precio||0)+'€').join(' | ');
+          rows.push([j.fecha,c.nombre,c.horaEntrega||'',...panes,extras||'',parseFloat(totalCliente(c).toFixed(2)),c.pagaHoy?'Cobrado':'A cuenta']);
+        });
+      });
+      rows.push([]);
+
+      // TABLA 3: arqueos
+      rows.push(['ARQUEOS DIARIOS']);
+      rows.push(['Fecha','Contado €','Esperado €','Diferencia €','Estado']);
+      jornadas.forEach(j=>{
+        if(j.arqueo&&j.arqueo.totalContado!=null){
+          const a=j.arqueo;
+          rows.push([j.fecha,a.totalContado,a.esperado,a.diferencia,a.diferencia===0?'✅ Cuadra':a.diferencia>0?'⚠️ Sobra':'❌ Falta']);
         }
-      }
+      });
+
+      const ws=XL.utils.aoa_to_sheet(rows);
+      ws['!cols']=[{wch:22},...dias.map(()=>({wch:6})),{wch:10},{wch:10},...PANES.map(()=>({wch:12})),{wch:25},{wch:10},{wch:10}];
+      XL.utils.book_append_sheet(wb,ws,rep.nombre.slice(0,31));
     }
 
-    // SECCIÓN 3: Cuentas pendientes
-    csv+='\nCUENTAS PENDIENTES\n';
-    csv+='Cliente,Total pendiente\n';
-    cuentas.filter(c=>c.total>0).forEach(c=>{
-      csv+=`"${c.cliente_nombre}",${c.total.toFixed(2)}\n`;
-    });
+    // HOJA RESUMEN
+    const resRows=[['RESUMEN MENSUAL — '+nombreMes],[]];
+    resRows.push(['Repartidor','Días','Cobrado €','A cuenta €','Clientes únicos']);
+    for(const rep of reps){
+      const jornadas=await dbGet('jornadas','repartidor_id=eq.'+rep.id+'&fecha=gte.'+desde+'&fecha=lte.'+hasta+'&cerrada=eq.true');
+      const cu=new Set();let tc=0,tcu=0;
+      jornadas.forEach(j=>(j.clientes_data||[]).forEach(c=>{cu.add(c.nombre);if(c.pagaHoy)tc+=totalCliente(c);else tcu+=totalCliente(c);}));
+      resRows.push([rep.nombre,jornadas.length,parseFloat(tc.toFixed(2)),parseFloat(tcu.toFixed(2)),cu.size]);
+    }
+    resRows.push([]);
+    resRows.push(['PAGOS RECIBIDOS ESTE MES']);
+    resRows.push(['Fecha','Cliente','Importe €']);
+    pagos.forEach(p=>resRows.push([p.fecha,p.cliente_nombre,parseFloat(p.importe.toFixed(2))]));
+    const wsRes=XL.utils.aoa_to_sheet(resRows);
+    wsRes['!cols']=[{wch:25},{wch:10},{wch:14},{wch:14},{wch:16}];
+    XL.utils.book_append_sheet(wb,wsRes,'Resumen');
 
-    // SECCIÓN 4: Pagos del mes
-    csv+='\nPAGOS RECIBIDOS ESTE MES\n';
-    csv+='Fecha,Cliente,Importe\n';
-    pagos.forEach(p=>{
-      csv+=`${p.fecha},"${p.cliente_nombre}",${p.importe.toFixed(2)}\n`;
+    // HOJA CUENTAS PENDIENTES
+    const cRows=[['CUENTAS PENDIENTES — '+new Date().toLocaleDateString('es-ES')],[]];
+    cRows.push(['Cliente','Total pendiente €','Último consumo','Estado']);
+    const haceUnMes=new Date();haceUnMes.setMonth(haceUnMes.getMonth()-1);
+    cuentas.forEach(c=>{
+      const uf=c.dias&&c.dias.length?c.dias[c.dias.length-1].fecha:'—';
+      const mor=uf!=='—'&&new Date(uf+'T12:00:00')<haceUnMes;
+      cRows.push([c.cliente_nombre,parseFloat(c.total.toFixed(2)),uf,mor?'⚠️ MÁS DE 1 MES':'Al día']);
     });
+    const wsCuen=XL.utils.aoa_to_sheet(cRows);
+    wsCuen['!cols']=[{wch:25},{wch:18},{wch:18},{wch:20}];
+    XL.utils.book_append_sheet(wb,wsCuen,'Cuentas pendientes');
 
-    // descargar
-    const BOM='\uFEFF'; // para que Excel muestre bien los acentos
-    const blob=new Blob([BOM+csv],{type:'text/csv;charset=utf-8'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url;
-    a.download=`panaderia_${anyo}_${mes}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    XL.writeFile(wb,'panaderia_'+anyo+'_'+mes+'.xlsx');
     mostrarToast('✅ Excel descargado');
-  }catch(e){mostrarToast('Error al exportar: '+e.message);}
+  }catch(e){mostrarToast('Error: '+e.message);console.error(e);}
 });
+
 
 document.getElementById('jefe-cancel').addEventListener('click',()=>cerrarModal('modal-jefe'));
 
@@ -1009,12 +1061,22 @@ function renderReparto(){
     card.setAttribute('data-id', c.id);
     card.setAttribute('draggable','true');
 
+    const entregado=c.entregado||false;
+
     // diseño compacto — cantidades siempre visibles
     const panesCompactoHtml=PANES.map(p=>{
       const precio=precioCliente(c,p.key);
       const normal=PANES.find(x=>x.key===p.key).precio;
       const esDif=esEspecial&&precio!==normal;
       const activo=c.qtys[p.key]>0;
+      if(entregado){
+        // modo bloqueado — solo mostrar cantidades sin botones
+        return `<div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 4px">
+          <span style="font-size:11px;font-weight:600;color:${esDif?'var(--blue)':'var(--muted)'}">${p.key}${esDif?'★':''}</span>
+          <span style="font-size:20px;font-weight:700;color:${activo?'var(--green)':'var(--muted)'}">${c.qtys[p.key]||'—'}</span>
+          <span style="font-size:10px;color:var(--muted)">${fmt(precio)}€</span>
+        </div>`;
+      }
       return `<div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 4px">
         <span style="font-size:11px;font-weight:600;color:${esDif?'var(--blue)':'var(--muted)'}">${p.key}${esDif?'★':''}</span>
         <button class="qb${activo?' on':''}" data-id="${c.id}" data-key="${p.key}" data-action="inc" style="width:36px;height:36px;font-size:20px">+</button>
@@ -1025,20 +1087,25 @@ function renderReparto(){
     }).join('');
 
     card.innerHTML=`
-      <div class="card-header" style="padding:10px 12px">
+      <div class="card-header" style="padding:10px 12px;background:${entregado?'var(--green-light)':'var(--bg)'}">
         <span class="drag-handle">⠿</span>
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             <span class="card-name">${c.nombre}</span>
-            ${esEspecial?'<span class="badge badge-blue">★</span>':''}
+            ${entregado?'<span class="badge badge-green">✓ Entregado</span>':''}
+            ${esEspecial&&!entregado?'<span class="badge badge-blue">★</span>':''}
             ${!c.pagaHoy?'<span class="badge badge-red">cuenta</span>':''}
             ${c.horaEntrega?'<span style="font-size:11px;color:var(--muted)">🕐 '+c.horaEntrega+'</span>':''}
           </div>
         </div>
-        <span class="card-amount">${fmt(total)} €</span>
+        <span class="card-amount" style="color:${entregado?'var(--green)':'var(--text)'}">${fmt(total)} €</span>
+        ${entregado
+          ? `<button style="background:none;border:none;font-size:12px;color:var(--muted);cursor:pointer;padding:4px" data-id="${c.id}" data-action="desmarcar">editar</button>`
+          : `<button class="btn btn-sm" style="background:var(--green-light);color:var(--green);border-color:var(--green);height:34px;padding:0 10px;font-size:12px" data-id="${c.id}" data-action="marcar-entregado">✓ Entregado</button>`
+        }
         <button class="del-btn" data-id="${c.id}" data-action="del">×</button>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(6,1fr);border-top:1px solid var(--border);background:var(--card)">
+      <div style="display:grid;grid-template-columns:repeat(6,1fr);border-top:1px solid var(--border);background:${entregado?'#f0fdf4':'var(--card)'}">
         ${panesCompactoHtml}
       </div>
       ${extras.length||window._jornadaCerrada===false?`<div class="extras-section" style="border-top:1px solid var(--border)">
@@ -1142,16 +1209,31 @@ document.getElementById('lista-clientes').addEventListener('click',async e=>{
   const btn=e.target.closest('[data-id]');if(!btn)return;
   e.stopPropagation(); // evitar que el click cierre el details
   const id=btn.dataset.id;const c=jornada.find(x=>x.id===id);if(!c)return;
+  if(c.entregado&&(action==='inc'||action==='dec'))return; // bloqueado
   const action=btn.dataset.action;
   if(action==='del'){
     const clienteEliminado=jornada.find(x=>x.id===id);
     jornada=jornada.filter(x=>x.id!==id);
     await guardarJornadaDB();renderReparto();
-    // mostrar toast con opción de deshacer
     mostrarToast('Cliente eliminado','Deshacer',async()=>{
       jornada.push(clienteEliminado);
       await guardarJornadaDB();renderReparto();
     });
+    return;
+  }
+  if(action==='marcar-entregado'){
+    // registrar hora si no tiene
+    if(!c.horaEntrega){
+      const ahora=new Date();
+      c.horaEntrega=String(ahora.getHours()).padStart(2,'0')+':'+String(ahora.getMinutes()).padStart(2,'0');
+    }
+    c.entregado=true;
+    await guardarJornadaDB();renderReparto();
+    return;
+  }
+  if(action==='desmarcar'){
+    c.entregado=false;
+    await guardarJornadaDB();renderReparto();
     return;
   }
   else if(action==='add-extra'){if(!c.extras)c.extras=[];c.extras.push({desc:'',precio:''});}
@@ -1244,6 +1326,7 @@ document.getElementById('lista-clientes').addEventListener('input',async e=>{
   if(inp.classList&&inp.classList.contains('qty-input')){
     const id=inp.dataset.id;const key=inp.dataset.key;
     const c=jornada.find(x=>x.id===id);if(!c)return;
+    if(c.entregado){inp.value=c.qtys[key];return;} // bloqueado
     const val=Math.max(0,parseInt(inp.value)||0);
     c.qtys[key]=val;
     if(val>0&&!c.horaEntrega&&PANES.reduce((s,p)=>s+c.qtys[p.key],0)===val){
@@ -1438,14 +1521,15 @@ async function ejecutarCierreJornada(){
   let resumenDia='Reparto '+repActual.nombre+' — '+fecha2+'\n\n';
   jornada_cerrada.forEach(c=>{
     const total=totalCliente(c);
-    const panes=PANES.filter(p=>c.qtys[p.key]>0).map(p=>c.qtys[p.key]+' '+p.key).join(', ');
+    const panes=PANES.filter(p=>c.qtys[p.key]>0).map(p=>c.qtys[p.key]+' '+p.nombre).join(', ');
     const extras=(c.extras||[]).filter(ex=>ex.desc||ex.precio).map(ex=>(ex.desc||'Extra')+' '+fmt(ex.precio||0)+' €').join(', ');
-    const devols=PANES.filter(p=>(c.devols&&c.devols[p.key]>0)).map(p=>'↩'+c.devols[p.key]+' '+p.key).join(', ');
-    resumenDia+='• '+c.nombre+': '+[panes,extras].filter(Boolean).join(' + ')+(devols?' (dev: '+devols+')':'')+' = '+fmt(total)+' €'+(c.pagaHoy?'':' (cuenta)')+'\n';
+    const devols=PANES.filter(p=>(c.devols&&c.devols[p.key]>0)).map(p=>'↩'+c.devols[p.key]+' '+p.nombre).join(', ');
+    const items=[panes,extras].filter(Boolean).join(' + ');
+    resumenDia+='• '+c.nombre+': '+(items||'sin panes')+(devols?' | dev: '+devols:'')+' = '+fmt(total)+' €'+(c.pagaHoy?'':' (cuenta)')+'\n';
   });
   const totPanes2={};PANES.forEach(p=>totPanes2[p.key]=0);
   jornada_cerrada.forEach(c=>PANES.forEach(p=>totPanes2[p.key]+=c.qtys[p.key]));
-  resumenDia+='\nTotal panes: '+PANES.filter(p=>totPanes2[p.key]>0).map(p=>totPanes2[p.key]+' '+p.key).join(', ');
+  resumenDia+='\nTotal panes: '+PANES.filter(p=>totPanes2[p.key]>0).map(p=>totPanes2[p.key]+' '+p.nombre).join(', ');
   const totalCobrado2=jornada_cerrada.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
   const totalCuenta2=jornada_cerrada.filter(c=>!c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
   resumenDia+='\nCobrado: '+fmt(totalCobrado2)+' €';
@@ -1631,14 +1715,15 @@ async function renderHistorial(){
       const devolStr=PANES.filter(p=>dd[p.key]>0).map(p=>`<span class="pan-chip" style="background:var(--green-light);color:var(--green);border-color:var(--green)">↩${p.key}:${dd[p.key]}</span>`).join('');
       // detalle por cliente
       const clientesHtml=cls.map(c=>{
-        const panesCli=PANES.filter(p=>c.qtys[p.key]>0).map(p=>c.qtys[p.key]+' '+p.key).join(', ');
+        const panesCli=PANES.filter(p=>c.qtys[p.key]>0).map(p=>c.qtys[p.key]+' '+p.nombre).join(', ');
         const extrasCli=(c.extras||[]).filter(ex=>ex.desc||ex.precio).map(ex=>(ex.desc||'Extra')+' '+fmt(ex.precio||0)+'€').join(', ');
         const totalCli=totalCliente(c);
         const hora=c.horaEntrega?'<span style="color:var(--muted)"> 🕐'+c.horaEntrega+'</span>':'';
+        const items=[panesCli,extrasCli].filter(Boolean).join(' + ');
         return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px">
           <div>
             <span style="font-weight:500">${c.nombre}</span>${hora}
-            <div style="color:var(--muted);font-size:11px">${[panesCli,extrasCli].filter(Boolean).join(' + ')}${!c.pagaHoy?' 📋':''}${c.devols&&PANES.some(p=>c.devols[p.key]>0)?' ↩'+PANES.filter(p=>c.devols[p.key]>0).map(p=>c.devols[p.key]+p.key).join(','):''}
+            <div style="color:var(--muted);font-size:11px">${items||'—'}${!c.pagaHoy?' 📋':''}${c.devols&&PANES.some(p=>c.devols[p.key]>0)?' ↩'+PANES.filter(p=>c.devols[p.key]>0).map(p=>c.devols[p.key]+' '+p.nombre).join(', '):''}
             </div>
           </div>
           <span style="font-weight:600;margin-left:8px">${fmt(totalCli)} €</span>
