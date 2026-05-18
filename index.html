@@ -165,6 +165,18 @@ details summary::-webkit-details-marker{display:none}
 </head>
 <body>
 
+<!-- MODAL: confirmación -->
+<div class="modal-bg" id="modal-confirm">
+  <div class="modal" style="max-width:340px">
+    <div class="modal-handle"></div>
+    <p id="confirm-msg" style="font-size:15px;margin-bottom:1.25rem;color:var(--text)"></p>
+    <div class="modal-btns">
+      <button class="btn btn-full" id="confirm-no">Cancelar</button>
+      <button class="btn btn-full btn-primary" id="confirm-si">Confirmar</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL: contraseña jefe -->
 <div class="modal-bg" id="modal-pass-jefe">
   <div class="modal">
@@ -1013,6 +1025,9 @@ function renderFijos(){
 
 async function guardarJornadaDB(){
   const hoy=hoyISO();
+  // mostrar indicador de guardado
+  const badge=document.getElementById('badge-clientes');
+  if(badge){const orig=badge.style.background;badge.style.background='var(--warn)';setTimeout(()=>badge.style.background='',800);}
   if(window._jid){await dbUpdate('jornadas',window._jid,{clientes_data:jornada});}
   else{const res=await dbInsert('jornadas',{repartidor_id:repActual.id,fecha:hoy,clientes_data:jornada,cerrada:false});if(res&&res[0])window._jid=res[0].id;}
 }
@@ -1029,7 +1044,6 @@ async function comprobarAlertas(){
 // RENDER REPARTO
 function renderReparto(){
   const lista=document.getElementById('lista-clientes');lista.innerHTML='';
-  // banner si la jornada está cerrada
   if(window._jornadaCerrada){
     const banner=document.createElement('div');
     banner.style.cssText='background:var(--warn-light);color:var(--warn);border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;font-weight:500;margin-bottom:1rem;text-align:center';
@@ -1037,7 +1051,28 @@ function renderReparto(){
     lista.appendChild(banner);
   }
   if(!jornada.length){lista.innerHTML='<div class="empty"><div class="empty-icon">🛵</div>Añade el primer cliente del reparto</div>';}
-  jornada.forEach(c=>{
+
+  // ordenar: pendientes primero, entregados al final
+  const ordenados=[...jornada].sort((a,b)=>(a.entregado?1:0)-(b.entregado?1:0));
+  const pendientes=jornada.filter(c=>!c.entregado).length;
+  const entregados=jornada.filter(c=>c.entregado).length;
+
+  // separador pendientes
+  if(pendientes>0&&entregados>0){
+    const sep=document.createElement('div');
+    sep.style.cssText='font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;padding:4px 2px;margin-bottom:4px';
+    sep.textContent='Pendientes ('+pendientes+')';
+    lista.appendChild(sep);
+  }
+
+  ordenados.forEach((c,idx)=>{
+    // separador entregados
+    if(c.entregado&&(idx===0||!ordenados[idx-1].entregado)){
+      const sep=document.createElement('div');
+      sep.style.cssText='font-size:12px;font-weight:600;color:var(--green);text-transform:uppercase;letter-spacing:.5px;padding:4px 2px;margin:8px 0 4px';
+      sep.textContent='Entregados ('+entregados+') ✓';
+      lista.appendChild(sep);
+    }
     const esEspecial=tieneEspecial(c);const total=totalCliente(c);
     const card=document.createElement('div');card.className='card';
     const devols=c.devols||{};
@@ -1117,7 +1152,9 @@ function renderReparto(){
     lista.appendChild(card);
   });
   document.getElementById('resumen').style.display=jornada.length?'block':'none';
-  document.getElementById('badge-clientes').textContent=jornada.length;
+  // badge muestra pendientes/total
+  const pendientesBadge=jornada.filter(c=>!c.entregado).length;
+  document.getElementById('badge-clientes').textContent=pendientesBadge>0?pendientesBadge+'/'+jornada.length:jornada.length+' ✓';
   document.getElementById('r-nc').textContent=jornada.length;
   actualizarResumenGlobal();
   iniciarDragDrop();
@@ -1207,10 +1244,10 @@ function iniciarDragDrop(){
 
 document.getElementById('lista-clientes').addEventListener('click',async e=>{
   const btn=e.target.closest('[data-id]');if(!btn)return;
-  e.stopPropagation(); // evitar que el click cierre el details
+  e.stopPropagation();
   const id=btn.dataset.id;const c=jornada.find(x=>x.id===id);if(!c)return;
-  if(c.entregado&&(action==='inc'||action==='dec'))return; // bloqueado
   const action=btn.dataset.action;
+  if(c.entregado&&(action==='inc'||action==='dec'))return; // bloqueado
   if(action==='del'){
     const clienteEliminado=jornada.find(x=>x.id===id);
     jornada=jornada.filter(x=>x.id!==id);
@@ -1443,6 +1480,19 @@ document.getElementById('modal-arqueo').addEventListener('click',e=>{
 
 document.getElementById('monedas-total').addEventListener('input',actualizarArqueo);
 
+// CONFIRMACIÓN personalizada
+function confirmar(msg){
+  return new Promise(resolve=>{
+    document.getElementById('confirm-msg').textContent=msg;
+    abrirModal('modal-confirm');
+    const si=document.getElementById('confirm-si');
+    const no=document.getElementById('confirm-no');
+    const cleanup=()=>{cerrarModal('modal-confirm');si.replaceWith(si.cloneNode(true));no.replaceWith(no.cloneNode(true));};
+    document.getElementById('confirm-si').addEventListener('click',()=>{cleanup();resolve(true);},{once:true});
+    document.getElementById('confirm-no').addEventListener('click',()=>{cleanup();resolve(false);},{once:true});
+  });
+}
+
 // TOAST con deshacer
 function mostrarToast(msg,btnLabel,onUndo){
   document.querySelectorAll('.toast-el').forEach(t=>t.remove());
@@ -1632,12 +1682,12 @@ async function renderCuentas(){
       btnMes.style.cssText='width:100%;margin-top:8px';
       btnMes.textContent='Marcar '+tituloMes+' como pagado ✓';
       btnMes.addEventListener('click',async()=>{
-        if(!confirm('¿Marcar '+tituloMes+' de '+cuenta.cliente_nombre+' como pagado?'))return;
+        const ok=await confirmar('¿Marcar '+tituloMes+' de '+cuenta.cliente_nombre+' como pagado?');
+        if(!ok)return;
         try{
           const diasRestantes=(cuenta.dias||[]).filter(d=>d.fecha.slice(0,7)!==mk);
           const nuevoTotal=diasRestantes.reduce((s,d)=>s+d.importe,0);
           await dbUpdate('cuentas',cuenta.id,{total:parseFloat(nuevoTotal.toFixed(2)),dias:diasRestantes,updated_at:new Date().toISOString()});
-          // registrar pago
           await dbInsert('pagos',{cliente_nombre:cuenta.cliente_nombre,cliente_id:cuenta.cliente_id||null,importe:dataMes.total,fecha:hoyISO()});
           renderCuentas();comprobarAlertas();
         }catch(e){mostrarToast('Error: '+e.message);}
@@ -1671,9 +1721,9 @@ async function renderCuentas(){
     btnTodo.className='btn btn-sm btn-success';
     btnTodo.textContent='Marcar todo pagado ✓';
     btnTodo.addEventListener('click',async()=>{
-      if(!confirm('¿Marcar TODA la cuenta de '+cuenta.cliente_nombre+' como pagada?'))return;
+      const ok=await confirmar('¿Marcar TODA la cuenta de '+cuenta.cliente_nombre+' como pagada?');
+      if(!ok)return;
       try{
-        // registrar pago por el total antes de borrar
         await dbInsert('pagos',{cliente_nombre:cuenta.cliente_nombre,cliente_id:cuenta.cliente_id||null,importe:cuenta.total,fecha:hoyISO()});
         await dbUpdate('cuentas',cuenta.id,{total:0,dias:[],updated_at:new Date().toISOString()});
         renderCuentas();comprobarAlertas();
@@ -2129,7 +2179,8 @@ async function guardarCG(){
   }catch(e){errEl.textContent='Error: '+e.message;errEl.style.display='block';}
 }
 async function eliminarCG(){
-  if(!confirm('¿Eliminar este cliente?'))return;
+  const ok=await confirmar('¿Eliminar este cliente? Esta acción no se puede deshacer.');
+  if(!ok)return;
   await dbDelete('clientes',editCGId);
   clientesGuardados=await dbGet('clientes','order=nombre.asc');
   cerrarModal('modal-cg');renderClientesGuardados();
