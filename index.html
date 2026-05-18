@@ -90,14 +90,14 @@ input:focus,select:focus{border-color:var(--accent)}
 .loading{text-align:center;padding:2.5rem;color:var(--muted);font-size:14px}
 .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;align-items:flex-end;justify-content:center}
 .modal-bg.open{display:flex}
-.modal{background:var(--card);border-radius:var(--radius) var(--radius) 0 0;padding:1.5rem 1.25rem 2rem;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;animation:slideUp .2s ease}
+.modal{background:var(--card);border-radius:var(--radius) var(--radius) 0 0;padding:1.5rem 1.25rem 2rem;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;overflow-x:hidden;animation:slideUp .2s ease;position:relative}
 @keyframes slideUp{from{transform:translateY(40px);opacity:0}to{transform:translateY(0);opacity:1}}
 .modal h3{font-size:18px;font-weight:600;margin-bottom:1.25rem}
 .modal-handle{width:36px;height:4px;background:var(--border);border-radius:99px;margin:0 auto 1.25rem}
 .field{margin-bottom:12px}
 .field label{font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px}
 .modal-btns{display:flex;gap:8px;margin-top:16px}
-.precio-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.precio-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;position:relative;z-index:1}
 .precio-grid .field label{font-size:11px}
 .precio-grid input{height:40px;font-size:14px}
 .err{background:var(--red-light);color:var(--red);padding:9px 12px;border-radius:var(--radius-sm);font-size:13px;margin-bottom:10px;display:none}
@@ -453,6 +453,7 @@ details summary::-webkit-details-marker{display:none}
         <option value="si">Sí — no descontar del stock</option>
       </select>
     </div>
+    <div class="field"><label>¿Acepta devoluciones de pan?</label>
       <select id="mcg-devol">
         <option value="no">No</option>
         <option value="si">Sí, recoge devoluciones ↩</option>
