@@ -1130,7 +1130,6 @@ function renderReparto(){
             ${entregado?'<span class="badge badge-green">✓ Entregado</span>':''}
             ${esEspecial&&!entregado?'<span class="badge badge-blue">★</span>':''}
             ${!c.pagaHoy?'<span class="badge badge-red">cuenta</span>':''}
-            ${c.horaEntrega?'<span style="font-size:11px;color:var(--muted)">🕐 '+c.horaEntrega+'</span>':''}
           </div>
         </div>
         <span class="card-amount" style="color:${entregado?'var(--green)':'var(--text)'}">${fmt(total)} €</span>
