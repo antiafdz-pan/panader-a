@@ -149,6 +149,16 @@ input:focus,select:focus{border-color:var(--accent)}
 .drag-handle:active{cursor:grabbing}
 .card.dragging{opacity:0.4;border:2px dashed var(--accent)}
 .card.drag-over{border:2px solid var(--accent);transform:scale(1.01)}
+.tabla-mes{width:100%;border-collapse:collapse;font-size:11px}
+.tabla-mes th,.tabla-mes td{border:1px solid var(--border);padding:4px 6px;text-align:center;white-space:nowrap}
+.tabla-mes th{background:var(--bg);font-weight:600;color:var(--muted);position:sticky;top:0}
+.tabla-mes td:first-child{text-align:left;font-weight:500;position:sticky;left:0;background:var(--card);min-width:100px}
+.tabla-mes tr:hover td{background:var(--accent-light)}
+.tabla-mes tr:hover td:first-child{background:var(--accent-light)}
+.tabla-mes .total-row td{background:var(--bg);font-weight:700;border-top:2px solid var(--border)}
+.tabla-mes .total-col{background:var(--bg);font-weight:700}
+.cel-cuenta{color:var(--warn);font-size:10px}
+.tabla-wrap{overflow-x:auto;border-radius:var(--radius-sm);border:1.5px solid var(--border)}
 details summary::-webkit-details-marker{display:none}
 .error-banner{background:var(--red-light);color:var(--red);border-radius:var(--radius-sm);padding:12px 14px;font-size:13px;margin-bottom:1rem}
 </style>
@@ -264,9 +274,11 @@ details summary::-webkit-details-marker{display:none}
       <div style="display:flex;gap:4px;margin-bottom:1rem;background:var(--border);padding:3px;border-radius:var(--radius-sm)">
         <button class="tab active" id="subtab-dias" onclick="switchSubtab('dias')">Por días</button>
         <button class="tab" id="subtab-clientes-hist" onclick="switchSubtab('clientes-hist')">Por clientes</button>
+        <button class="tab" id="subtab-tabla" onclick="switchSubtab('tabla')">Tabla mes</button>
       </div>
       <div id="subpanel-dias"><div id="hist-contenido"><div class="empty"><div class="empty-icon">📋</div>Sin historial aún</div></div></div>
       <div id="subpanel-clientes-hist" style="display:none"><div id="hist-clientes-contenido"><div class="empty"><div class="empty-icon">👥</div>Sin datos aún</div></div></div>
+      <div id="subpanel-tabla" style="display:none"><div id="hist-tabla-contenido"><div class="empty"><div class="empty-icon">📅</div>Sin datos aún</div></div></div>
     </div>
     <div id="panel-clientes-g" style="display:none">
       <div style="display:flex;gap:8px;margin-bottom:1rem">
@@ -370,6 +382,7 @@ details summary::-webkit-details-marker{display:none}
     <h3>👁 Panel del jefe</h3>
     <div id="jefe-contenido"><div class="loading">Cargando...</div></div>
     <div class="modal-btns" style="margin-top:1rem">
+      <button class="btn btn-full" id="btn-exportar-excel" style="background:var(--green-light);color:var(--green);border-color:var(--green)">📊 Exportar a Excel</button>
       <button class="btn btn-full" id="jefe-cancel">Cerrar</button>
     </div>
   </div>
@@ -786,6 +799,80 @@ async function cargarPanelJefe(){
     cont.innerHTML=html;
   }catch(e){cont.innerHTML='<div class="error-banner">Error: '+e.message+'</div>';}
 }
+document.getElementById('btn-exportar-excel').addEventListener('click',async()=>{
+  mostrarToast('Generando Excel...');
+  try{
+    const hoy=new Date();
+    const mes=String(hoy.getMonth()+1).padStart(2,'0');
+    const anyo=hoy.getFullYear();
+    const desde=`${anyo}-${mes}-01`;
+    const dFin=new Date(anyo,hoy.getMonth()+1,0);
+    const hasta=`${anyo}-${mes}-${String(dFin.getDate()).padStart(2,'0')}`;
+
+    const reps=await dbGet('repartidores','order=nombre.asc');
+    const cuentas=await dbGet('cuentas','order=cliente_nombre.asc');
+    const pagos=await dbGet('pagos',`fecha=gte.${desde}&fecha=lte.${hasta}&order=fecha.asc`);
+
+    // construir CSV con múltiples secciones
+    let csv='PANADERÍA PALLARES — Exportación '+MESES[hoy.getMonth()]+' '+anyo+'\n\n';
+
+    // SECCIÓN 1: Repartos del mes por repartidor
+    csv+='REPARTOS DEL MES\n';
+    csv+='Repartidor,Fecha,Clientes,'+PANES.map(p=>p.nombre).join(',')+',Total cobrado,Total cuenta\n';
+
+    for(const rep of reps){
+      const jornadas=await dbGet('jornadas',`repartidor_id=eq.${rep.id}&fecha=gte.${desde}&fecha=lte.${hasta}&cerrada=eq.true&order=fecha.asc`);
+      for(const j of jornadas){
+        const cls=j.clientes_data||[];
+        const totCobrado=cls.filter(c=>c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
+        const totCuenta=cls.filter(c=>!c.pagaHoy).reduce((s,c)=>s+totalCliente(c),0);
+        const panesDia=PANES.map(p=>cls.reduce((s,c)=>s+(c.qtys[p.key]||0),0));
+        csv+=`${rep.nombre},${j.fecha},${cls.length},${panesDia.join(',')},${totCobrado.toFixed(2)},${totCuenta.toFixed(2)}\n`;
+      }
+    }
+
+    // SECCIÓN 2: Detalle por cliente y día
+    csv+='\nDETALLE POR CLIENTE\n';
+    csv+='Repartidor,Fecha,Cliente,Hora,'+PANES.map(p=>p.key).join(',')+',Extras,Total,Pago\n';
+    for(const rep of reps){
+      const jornadas=await dbGet('jornadas',`repartidor_id=eq.${rep.id}&fecha=gte.${desde}&fecha=lte.${hasta}&cerrada=eq.true&order=fecha.asc`);
+      for(const j of jornadas){
+        const cls=j.clientes_data||[];
+        for(const c of cls){
+          const panes=PANES.map(p=>c.qtys[p.key]||0);
+          const extras=(c.extras||[]).filter(ex=>ex.desc).map(ex=>ex.desc+':'+ex.precio).join(' | ');
+          csv+=`${rep.nombre},${j.fecha},"${c.nombre}",${c.horaEntrega||''},${panes.join(',')},${extras?'"'+extras+'"':''},${totalCliente(c).toFixed(2)},${c.pagaHoy?'Cobrado':'Cuenta'}\n`;
+        }
+      }
+    }
+
+    // SECCIÓN 3: Cuentas pendientes
+    csv+='\nCUENTAS PENDIENTES\n';
+    csv+='Cliente,Total pendiente\n';
+    cuentas.filter(c=>c.total>0).forEach(c=>{
+      csv+=`"${c.cliente_nombre}",${c.total.toFixed(2)}\n`;
+    });
+
+    // SECCIÓN 4: Pagos del mes
+    csv+='\nPAGOS RECIBIDOS ESTE MES\n';
+    csv+='Fecha,Cliente,Importe\n';
+    pagos.forEach(p=>{
+      csv+=`${p.fecha},"${p.cliente_nombre}",${p.importe.toFixed(2)}\n`;
+    });
+
+    // descargar
+    const BOM='\uFEFF'; // para que Excel muestre bien los acentos
+    const blob=new Blob([BOM+csv],{type:'text/csv;charset=utf-8'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download=`panaderia_${anyo}_${mes}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    mostrarToast('✅ Excel descargado');
+  }catch(e){mostrarToast('Error al exportar: '+e.message);}
+});
+
 document.getElementById('jefe-cancel').addEventListener('click',()=>cerrarModal('modal-jefe'));
 
 // LOGIN
@@ -1705,11 +1792,112 @@ function switchTab(tab){
 }
 
 function switchSubtab(sub){
-  ['dias','clientes-hist'].forEach(t=>{
-    document.getElementById('subpanel-'+t).style.display=t===sub?'block':'none';
+  ['dias','clientes-hist','tabla'].forEach(t=>{
+    const panel=document.getElementById('subpanel-'+t);
+    if(panel)panel.style.display=t===sub?'block':'none';
     const btn=document.getElementById('subtab-'+t);if(btn)btn.classList.toggle('active',t===sub);
   });
   if(sub==='clientes-hist')renderConsumoClientes();
+  if(sub==='tabla')renderTablaMes();
+}
+
+async function renderTablaMes(){
+  const cont=document.getElementById('hist-tabla-contenido');
+  cont.innerHTML='<div class="loading">Cargando...</div>';
+  try{
+    const hoy=new Date();
+    const meses=[];
+    for(let i=0;i<6;i++){
+      const d=new Date(hoy.getFullYear(),hoy.getMonth()-i,1);
+      meses.push({label:MESES[d.getMonth()]+' '+d.getFullYear(),year:d.getFullYear(),month:d.getMonth()});
+    }
+    // selector de mes
+    let html='<div style="margin-bottom:1rem"><select id="sel-mes-tabla" style="height:40px;font-size:14px">';
+    meses.forEach((m,i)=>html+='<option value="'+i+'">'+m.label+'</option>');
+    html+='</select></div><div id="tabla-mes-body"></div>';
+    cont.innerHTML=html;
+    document.getElementById('sel-mes-tabla').addEventListener('change',function(){
+      cargarTablaMes(meses[parseInt(this.value)]);
+    });
+    cargarTablaMes(meses[0]);
+  }catch(e){cont.innerHTML='<div class="error-banner">Error: '+e.message+'</div>';}
+}
+
+async function cargarTablaMes(mes){
+  const tbody=document.getElementById('tabla-mes-body');
+  if(!tbody)return;
+  tbody.innerHTML='<div class="loading">Cargando tabla...</div>';
+
+  const dFin=new Date(mes.year,mes.month+1,0);
+  const diasMes=dFin.getDate();
+  const desde=mes.year+'-'+String(mes.month+1).padStart(2,'0')+'-01';
+  const hasta=mes.year+'-'+String(mes.month+1).padStart(2,'0')+'-'+String(diasMes).padStart(2,'0');
+
+  // cargar jornadas de todos los repartidores
+  const reps=await dbGet('repartidores','order=nombre.asc');
+  const todasJornadas=[];
+  for(const rep of reps){
+    const js=await dbGet('jornadas','repartidor_id=eq.'+rep.id+'&fecha=gte.'+desde+'&fecha=lte.'+hasta+'&cerrada=eq.true');
+    js.forEach(j=>todasJornadas.push({...j,repNombre:rep.nombre}));
+  }
+
+  // agrupar por cliente → día → importe
+  const porCliente={};
+  todasJornadas.forEach(j=>{
+    const cls=j.clientes_data||[];
+    cls.forEach(c=>{
+      const nombre=c.nombre;
+      if(!porCliente[nombre])porCliente[nombre]={};
+      const dia=parseInt(j.fecha.split('-')[2]);
+      if(!porCliente[nombre][dia])porCliente[nombre][dia]={importe:0,cuenta:false};
+      porCliente[nombre][dia].importe+=totalCliente(c);
+      porCliente[nombre][dia].cuenta=!c.pagaHoy;
+    });
+  });
+
+  const clientes=Object.keys(porCliente).sort();
+  if(!clientes.length){tbody.innerHTML='<div class="empty">Sin datos este mes</div>';return;}
+
+  // construir tabla
+  const dias=Array.from({length:diasMes},(_,i)=>i+1);
+
+  let table='<div class="tabla-wrap"><table class="tabla-mes"><thead><tr>';
+  table+='<th>Cliente</th>';
+  dias.forEach(d=>table+='<th>'+d+'</th>');
+  table+='<th class="total-col">Total</th>';
+  table+='</tr></thead><tbody>';
+
+  // totales por día
+  const totalesDia={};dias.forEach(d=>totalesDia[d]=0);
+  let totalGeneral=0;
+
+  clientes.forEach(nombre=>{
+    table+='<tr><td>'+nombre+'</td>';
+    let totalCliente=0;
+    dias.forEach(d=>{
+      const dato=porCliente[nombre][d];
+      if(dato&&dato.importe>0){
+        const val=fmt(dato.importe);
+        table+='<td style="color:'+(dato.cuenta?'var(--warn)':'var(--text)')+'">'+val+(dato.cuenta?'*':'')+'</td>';
+        totalesDia[d]+=dato.importe;
+        totalCliente+=dato.importe;
+      } else {
+        table+='<td style="color:var(--border)">—</td>';
+      }
+    });
+    totalGeneral+=totalCliente;
+    table+='<td class="total-col" style="color:var(--accent)">'+fmt(totalCliente)+'</td>';
+    table+='</tr>';
+  });
+
+  // fila totales
+  table+='<tr class="total-row"><td>TOTAL</td>';
+  dias.forEach(d=>table+='<td>'+(totalesDia[d]>0?fmt(totalesDia[d]):'')+'</td>');
+  table+='<td class="total-col" style="color:var(--accent);font-size:13px">'+fmt(totalGeneral)+'</td>';
+  table+='</tr></tbody></table></div>';
+  table+='<div style="font-size:11px;color:var(--muted);margin-top:6px">* En naranja = a cuenta</div>';
+
+  tbody.innerHTML=table;
 }
 
 async function renderConsumoClientes(){
